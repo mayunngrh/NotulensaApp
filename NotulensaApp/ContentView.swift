@@ -7,15 +7,24 @@
 
 import SwiftUI
 
+@Observable
+final class AppRouter {
+    /// When set, the app is running an event in kiosk mode.
+    var runningEvent: Event?
+}
+
 struct ContentView: View {
+    @State private var router = AppRouter()
+
     var body: some View {
-        VStack {
-            Image(systemName: "globe")
-                .imageScale(.large)
-                .foregroundStyle(.tint)
-            Text("Hello, world!")
+        Group {
+            if let event = router.runningEvent {
+                KioskView(event: event)
+            } else {
+                DashboardView()
+            }
         }
-        .padding()
+        .environment(router)
     }
 }
 
