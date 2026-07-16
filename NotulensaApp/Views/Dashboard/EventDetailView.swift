@@ -81,17 +81,9 @@ struct EventDetailView: View {
                 Text("Countdown timing, photo review duration, GIF size, and live photo looping.")
             }
 
-            Section {
-                Button {
-                    router.runningEvent = event
-                } label: {
-                    Label("Start Event", systemImage: "play.circle.fill")
-                        .font(.title3)
-                        .frame(maxWidth: .infinity)
-                }
-                .disabled(!event.canStart)
-                if !event.canStart {
-                    Text("Add at least one template before starting.")
+            if !event.canStart {
+                Section {
+                    Text("Add at least one template — then launch from the dashboard.")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }

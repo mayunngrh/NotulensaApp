@@ -135,25 +135,37 @@ struct ResultView: View {
             Text("Scan to Download")
                 .font(.title.bold())
 
-            switch viewModel.uploadState {
-            case .done(let url):
-                if let qr = QRService.qrImage(for: url) {
+            // The session folder (and its public link) is created when the session starts,
+            // so the QR is always ready here — files stream in behind it.
+            if let link = viewModel.driveLink {
+                if let qr = QRService.qrImage(for: link) {
                     Image(nsImage: qr)
                         .interpolation(.none)
                         .resizable()
                         .frame(width: 280, height: 280)
                 }
-                Text("All session photos, GIF, and live photo are in this Google Drive folder.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            case .uploading:
-                ProgressView()
-                    .controlSize(.large)
-                    .frame(width: 280, height: 280)
-                Text("Uploading your session to Google Drive…")
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-            case .notSignedIn:
+                switch viewModel.uploadState {
+                case .done:
+                    Label("All photos, GIF, and live photo are in the folder.", systemImage: "checkmark.circle.fill")
+                        .font(.callout)
+                        .foregroundStyle(.green)
+                case .failed(let message):
+                    Text("Some files failed to upload: \(message)")
+                        .font(.caption)
+                        .multilineTextAlignment(.center)
+                        .foregroundStyle(.orange)
+                    Button {
+                        viewModel.retryUpload()
+                    } label: {
+                        Label("Retry Upload", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderedProminent)
+                default:
+                    Label("Files are uploading — they'll appear in the folder shortly.", systemImage: "arrow.up.circle")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+            } else if case .notSignedIn = viewModel.uploadState {
                 Image(systemName: "person.crop.circle.badge.exclamationmark")
                     .font(.system(size: 80))
                     .foregroundStyle(.secondary)
@@ -162,23 +174,23 @@ struct ResultView: View {
                     .font(.callout)
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
-            case .failed(let message):
+            } else if case .failed(let message) = viewModel.uploadState {
                 Image(systemName: "exclamationmark.triangle")
                     .font(.system(size: 80))
                     .foregroundStyle(.orange)
                     .frame(width: 280, height: 160)
-                Text("Upload failed: \(message)")
+                Text("Could not reach Google Drive: \(message)")
                     .font(.callout)
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
                 Button {
                     viewModel.retryUpload()
                 } label: {
-                    Label("Retry Upload", systemImage: "arrow.clockwise")
+                    Label("Retry", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-            case .idle:
+            } else {
                 ProgressView()
                     .frame(width: 280, height: 280)
             }

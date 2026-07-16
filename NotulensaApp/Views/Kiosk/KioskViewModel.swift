@@ -52,12 +52,17 @@ final class KioskViewModel {
         case failed(String)
     }
     var uploadState: UploadState = .idle
+    /// Public session-folder link — ready right after the session starts, before any upload.
+    var driveLink: URL?
     /// Drive folder link, persisted with the session record.
     var pendingDriveURL: String?
 
     private var captureTask: Task<Void, Never>?
     private var reviewTask: Task<Void, Never>?
     private var uploadTask: Task<Void, Never>?
+    /// Resolves to the session folder ID; kicked off at session start so the QR is
+    /// valid long before the outputs finish uploading.
+    private var driveFolderTask: Task<String, Error>?
 
     init(event: Event) {
         self.event = event
@@ -80,7 +85,9 @@ final class KioskViewModel {
         reviewShot = nil
         errorMessage = nil
         uploadState = .idle
+        driveLink = nil
         pendingDriveURL = nil
+        prepareDriveFolder()
         if event.templates.count == 1 {
             template = event.templates[0]
             state = .capturing
@@ -227,36 +234,61 @@ final class KioskViewModel {
         startUpload(printablePath: printablePath, gifPath: gifPath, livePhotoPath: livePhotoPath, rawPaths: rawPaths)
     }
 
-    // MARK: Drive upload — one folder per session with every output inside
+    // MARK: Drive upload — folder created at session start (QR valid immediately),
+    // files streamed into it in the background once the outputs exist.
 
     private var lastUploadArgs: (printable: String, gif: String?, live: String?, raw: [String])?
 
+    /// Creates Master → Event → Session folders and makes the session folder public.
+    /// Runs while the guest is still taking photos, so the QR never has to wait.
+    private func prepareDriveFolder() {
+        let auth = GoogleAuthService.shared
+        driveFolderTask?.cancel()
+        driveFolderTask = nil
+        guard auth.isSignedIn else {
+            uploadState = .notSignedIn
+            return
+        }
+        let eventName = event.name
+        driveFolderTask = Task { [weak self] in
+            let token = try await auth.validAccessToken()
+            let drive = DriveUploader(accessToken: token)
+            let rootID = try await drive.ensureFolder(name: auth.masterFolderName, parentID: nil)
+            let eventFolderID = try await drive.ensureFolder(name: eventName, parentID: rootID)
+            let sessionName = Date.now.formatted(.dateTime.year().month().day().hour().minute().second())
+                .replacingOccurrences(of: "/", with: "-")
+            let sessionID = try await drive.createFolder(name: "Session \(sessionName)", parentID: eventFolderID)
+            try await drive.makePublic(fileID: sessionID)
+
+            let link = DriveUploader.folderLink(id: sessionID)
+            self?.driveLink = link
+            self?.pendingDriveURL = link.absoluteString
+            return sessionID
+        }
+    }
+
     func retryUpload() {
         guard let args = lastUploadArgs else { return }
+        if driveLink == nil {
+            prepareDriveFolder()
+        }
         startUpload(printablePath: args.printable, gifPath: args.gif, livePhotoPath: args.live, rawPaths: args.raw)
     }
 
     private func startUpload(printablePath: String, gifPath: String?, livePhotoPath: String?, rawPaths: [String]) {
         lastUploadArgs = (printablePath, gifPath, livePhotoPath, rawPaths)
         let auth = GoogleAuthService.shared
-        guard auth.isSignedIn else {
+        guard auth.isSignedIn, let folderTask = driveFolderTask else {
             uploadState = .notSignedIn
             return
         }
         uploadState = .uploading
-        let eventName = event.name
         uploadTask?.cancel()
         uploadTask = Task { [weak self] in
             do {
+                let sessionID = try await folderTask.value
                 let token = try await auth.validAccessToken()
                 let drive = DriveUploader(accessToken: token)
-
-                // Master Folder → Event → Session hierarchy in the signed-in account's My Drive.
-                let rootID = try await drive.ensureFolder(name: auth.masterFolderName, parentID: nil)
-                let eventID = try await drive.ensureFolder(name: eventName, parentID: rootID)
-                let sessionName = Date.now.formatted(.dateTime.year().month().day().hour().minute().second())
-                    .replacingOccurrences(of: "/", with: "-")
-                let sessionID = try await drive.createFolder(name: "Session \(sessionName)", parentID: eventID)
 
                 var files: [(String, String, String)] = [(printablePath, "printable.jpg", "image/jpeg")]
                 if let gifPath { files.append((gifPath, "animation.gif", "image/gif")) }
@@ -267,11 +299,7 @@ final class KioskViewModel {
                 for (relPath, name, mime) in files {
                     try await drive.upload(fileURL: MediaStore.url(for: relPath), as: name, mimeType: mime, parentID: sessionID)
                 }
-                try await drive.makePublic(fileID: sessionID)
-
-                let link = DriveUploader.folderLink(id: sessionID)
-                self?.pendingDriveURL = link.absoluteString
-                self?.uploadState = .done(link)
+                self?.uploadState = .done(DriveUploader.folderLink(id: sessionID))
             } catch {
                 if !Task.isCancelled {
                     self?.uploadState = .failed(error.localizedDescription)
