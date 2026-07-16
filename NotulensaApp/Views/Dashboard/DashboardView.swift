@@ -112,7 +112,7 @@ struct DashboardView: View {
         }
         for capture in event.captures {
             MediaStore.delete(relativePath: capture.filePath)
-            if let gif = capture.gifPath { MediaStore.delete(relativePath: gif) }
+            if let slideshow = capture.slideshowPath { MediaStore.delete(relativePath: slideshow) }
             if let live = capture.livePhotoPath { MediaStore.delete(relativePath: live) }
             for raw in capture.rawPhotoPaths { MediaStore.delete(relativePath: raw) }
         }

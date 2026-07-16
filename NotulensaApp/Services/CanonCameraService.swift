@@ -27,6 +27,7 @@ final class CanonCameraService {
     private var eventTimer: Timer?
     private var evfTimer: Timer?
     private var detectTimer: Timer?
+    private var keepAliveTimer: Timer?
     private var toastTask: Task<Void, Never>?
     /// Kiosk sets this; EVF only streams while it's on (and a camera is connected).
     private var evfEnabled = false
@@ -43,6 +44,8 @@ final class CanonCameraService {
     private let propEvfOutputDevice: EdsPropertyID = 0x0000_0500
     private let evfOutputPC: EdsUInt32 = 2
     private let cmdTakePicture: EdsCameraCommand = 0x0000_0000
+    /// Resets the camera's auto power-off countdown — the EDSDK "keep awake" command.
+    private let cmdExtendShutDownTimer: EdsCameraCommand = 0x0000_0001
     private let eventDirItemCreated: EdsObjectEvent = 0x0000_0204
     private let eventDirItemRequestTransfer: EdsObjectEvent = 0x0000_0208
     private let eventAll: EdsObjectEvent = 0x0000_0200
@@ -74,6 +77,17 @@ final class CanonCameraService {
         }
     }
 
+    /// Wakes the camera before a session: resets its auto power-off timer, and if the
+    /// body already went to sleep (command fails), drops the dead session so the
+    /// detection loop reconnects within a couple of seconds.
+    func wake() {
+        guard isConnected, let camera else { return }
+        let result = EdsSendCommand(camera, cmdExtendShutDownTimer, 0)
+        if result != EDS_ERR_OK {
+            handleDisconnect()
+        }
+    }
+
     /// Kiosk turns live view on/off; keeps the camera cool + battery alive between events.
     func setEvfEnabled(_ enabled: Bool) {
         evfEnabled = enabled
@@ -86,6 +100,8 @@ final class CanonCameraService {
 
     private func handleDisconnect() {
         let name = cameraName ?? "Canon camera"
+        keepAliveTimer?.invalidate()
+        keepAliveTimer = nil
         stopEvf()
         if let camera {
             EdsRelease(camera)
@@ -192,6 +208,17 @@ final class CanonCameraService {
         showToast("\(cameraName ?? "Canon camera") has been connected")
         if evfEnabled {
             startEvf()
+        }
+
+        // Keep the body awake while connected (booths idle long enough for auto power-off).
+        keepAliveTimer?.invalidate()
+        keepAliveTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in
+            MainActor.assumeIsolated {
+                let service = CanonCameraService.shared
+                if service.isConnected, let cam = service.camera {
+                    EdsSendCommand(cam, service.cmdExtendShutDownTimer, 0)
+                }
+            }
         }
     }
 

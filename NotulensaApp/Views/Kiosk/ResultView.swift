@@ -11,7 +11,7 @@ struct ResultView: View {
 
     private enum Tab: String, CaseIterable, Identifiable {
         case printable = "Photo"
-        case gif = "GIF"
+        case slideshow = "Slideshow"
         case live = "Live Photo"
         var id: String { rawValue }
     }
@@ -25,7 +25,7 @@ struct ResultView: View {
 
     private var availableTabs: [Tab] {
         var tabs: [Tab] = [.printable]
-        if result.gifURL != nil { tabs.append(.gif) }
+        if result.slideshowURL != nil { tabs.append(.slideshow) }
         if result.livePhotoURL != nil { tabs.append(.live) }
         return tabs
     }
@@ -33,8 +33,17 @@ struct ResultView: View {
     private var activeURL: URL {
         switch tab {
         case .printable: result.printableURL
-        case .gif: result.gifURL ?? result.printableURL
+        case .slideshow: result.slideshowURL ?? result.printableURL
         case .live: result.livePhotoURL ?? result.printableURL
+        }
+    }
+
+    /// Video URL for the currently selected tab, if it's a video tab.
+    private var activeVideoURL: URL? {
+        switch tab {
+        case .printable: nil
+        case .slideshow: result.slideshowURL
+        case .live: result.livePhotoURL
         }
     }
 
@@ -89,11 +98,11 @@ struct ResultView: View {
     @ViewBuilder
     private var preview: some View {
         switch tab {
-        case .printable, .gif:
+        case .printable:
             if let image = NSImage(contentsOf: activeURL) {
                 Image(nsImage: image).resizable().scaledToFit()
             }
-        case .live:
+        case .slideshow, .live:
             if let player {
                 VideoPlayer(player: player)
                     .aspectRatio(9.0 / 16.0, contentMode: .fit)
@@ -102,7 +111,7 @@ struct ResultView: View {
     }
 
     private func setupPlayerIfNeeded() {
-        guard tab == .live, let url = result.livePhotoURL else { return }
+        guard let url = activeVideoURL else { return }
         let item = AVPlayerItem(url: url)
         let p = AVQueuePlayer()
         p.isMuted = true
@@ -146,7 +155,7 @@ struct ResultView: View {
                 }
                 switch viewModel.uploadState {
                 case .done:
-                    Label("All photos, GIF, and live photo are in the folder.", systemImage: "checkmark.circle.fill")
+                    Label("All photos, slideshow, and live photo are in the folder.", systemImage: "checkmark.circle.fill")
                         .font(.callout)
                         .foregroundStyle(.green)
                 case .failed(let message):

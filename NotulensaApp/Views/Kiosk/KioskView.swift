@@ -81,11 +81,11 @@ struct KioskView: View {
     private func persistResult(_ vm: KioskViewModel) {
         guard let relPath = vm.pendingResultPath else { return }
         vm.pendingResultPath = nil
-        let photo = CompositedPhoto(filePath: relPath, gifPath: vm.pendingGifPath, livePhotoPath: vm.pendingLivePhotoPath)
+        let photo = CompositedPhoto(filePath: relPath, livePhotoPath: vm.pendingLivePhotoPath, slideshowPath: vm.pendingSlideshowPath)
         photo.rawPhotoPaths = vm.pendingRawPaths
         photo.driveURL = vm.pendingDriveURL
-        vm.pendingGifPath = nil
         vm.pendingLivePhotoPath = nil
+        vm.pendingSlideshowPath = nil
         vm.pendingRawPaths = []
         photo.event = event
         context.insert(photo)

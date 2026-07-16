@@ -40,11 +40,11 @@ struct CaptureSettingsView: View {
 
             Section {
                 Stepper("Width: \(event.gifWidth)px", value: $event.gifWidth, in: 240...1080, step: 60)
-                Stepper("Frame duration: \(event.gifFrameSeconds.formatted(.number.precision(.fractionLength(1))))s", value: $event.gifFrameSeconds, in: 0.2...2.0, step: 0.1)
+                Stepper("Each photo shows: \(event.gifFrameSeconds.formatted(.number.precision(.fractionLength(1))))s", value: $event.gifFrameSeconds, in: 0.2...2.0, step: 0.1)
             } header: {
-                Text("GIF")
+                Text("Slideshow (MP4)")
             } footer: {
-                Text("The GIF cycles through each captured photo at this size and speed.")
+                Text("The slideshow video cycles through each captured photo at this size and speed.")
             }
 
             Section {

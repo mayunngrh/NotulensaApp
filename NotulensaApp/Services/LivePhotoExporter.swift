@@ -49,13 +49,13 @@ enum LivePhotoExporter {
         let outW = Int(template.canvasWidth * scale)
         let outH = Int(template.canvasHeight * scale)
 
-        let fileName = "live-\(Int(Date.now.timeIntervalSince1970)).mov"
+        let fileName = "live-\(Int(Date.now.timeIntervalSince1970)).mp4"
         let dir = MediaStore.directory(.sessions).appendingPathComponent(eventID, isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let outputURL = dir.appendingPathComponent(fileName)
         try? FileManager.default.removeItem(at: outputURL)
 
-        let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mov)
+        let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
         let settings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: outW,

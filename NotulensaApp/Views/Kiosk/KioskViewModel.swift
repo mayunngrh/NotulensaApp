@@ -5,7 +5,7 @@ import AVFoundation
 
 struct SessionResult {
     let printableURL: URL
-    let gifURL: URL?
+    let slideshowURL: URL?
     let livePhotoURL: URL?
 }
 
@@ -44,8 +44,8 @@ final class KioskViewModel {
     var processingMessage: String = "Preparing your photos…"
     /// Set when a new result should be persisted into the event gallery.
     var pendingResultPath: String?
-    var pendingGifPath: String?
     var pendingLivePhotoPath: String?
+    var pendingSlideshowPath: String?
     var pendingRawPaths: [String] = []
 
     // MARK: Google Drive upload
@@ -84,6 +84,9 @@ final class KioskViewModel {
     }
 
     func startSession() {
+        // Make sure the DSLR is awake before the first countdown (resets its
+        // auto power-off timer; reconnects automatically if it already slept).
+        canon.wake()
         shots = [:]
         clips = [:]
         currentOrder = 1
@@ -217,8 +220,8 @@ final class KioskViewModel {
             return
         }
 
-        processingMessage = "Building your GIF…"
-        let gifPath = try? GifExporter.export(photos: shotsSnapshot, width: gifWidth, frameSeconds: gifFrameSeconds, eventID: eventID)
+        processingMessage = "Building your slideshow…"
+        let slideshowPath = try? await SlideshowExporter.export(photos: shotsSnapshot, width: gifWidth, frameSeconds: gifFrameSeconds, loops: 2, eventID: eventID)
 
         var livePhotoPath: String?
         if !clipsSnapshot.isEmpty {
@@ -248,22 +251,22 @@ final class KioskViewModel {
         }
 
         pendingResultPath = printablePath
-        pendingGifPath = gifPath
         pendingLivePhotoPath = livePhotoPath
+        pendingSlideshowPath = slideshowPath
         pendingRawPaths = rawPaths
         pendingDriveURL = nil
         state = .result(SessionResult(
             printableURL: MediaStore.url(for: printablePath),
-            gifURL: gifPath.map { MediaStore.url(for: $0) },
+            slideshowURL: slideshowPath.map { MediaStore.url(for: $0) },
             livePhotoURL: livePhotoPath.map { MediaStore.url(for: $0) }
         ))
-        startUpload(printablePath: printablePath, gifPath: gifPath, livePhotoPath: livePhotoPath, rawPaths: rawPaths)
+        startUpload(printablePath: printablePath, livePhotoPath: livePhotoPath, slideshowPath: slideshowPath, rawPaths: rawPaths)
     }
 
     // MARK: Drive upload — folder created at session start (QR valid immediately),
     // files streamed into it in the background once the outputs exist.
 
-    private var lastUploadArgs: (printable: String, gif: String?, live: String?, raw: [String])?
+    private var lastUploadArgs: (printable: String, live: String?, slideshow: String?, raw: [String])?
 
     /// Creates Master → Event → Session folders and makes the session folder public.
     /// Runs while the guest is still taking photos, so the QR never has to wait.
@@ -298,11 +301,11 @@ final class KioskViewModel {
         if driveLink == nil {
             prepareDriveFolder()
         }
-        startUpload(printablePath: args.printable, gifPath: args.gif, livePhotoPath: args.live, rawPaths: args.raw)
+        startUpload(printablePath: args.printable, livePhotoPath: args.live, slideshowPath: args.slideshow, rawPaths: args.raw)
     }
 
-    private func startUpload(printablePath: String, gifPath: String?, livePhotoPath: String?, rawPaths: [String]) {
-        lastUploadArgs = (printablePath, gifPath, livePhotoPath, rawPaths)
+    private func startUpload(printablePath: String, livePhotoPath: String?, slideshowPath: String?, rawPaths: [String]) {
+        lastUploadArgs = (printablePath, livePhotoPath, slideshowPath, rawPaths)
         let auth = GoogleAuthService.shared
         guard auth.isSignedIn, let folderTask = driveFolderTask else {
             uploadState = .notSignedIn
@@ -317,8 +320,8 @@ final class KioskViewModel {
                 let drive = DriveUploader(accessToken: token)
 
                 var files: [(String, String, String)] = [(printablePath, "printable.jpg", "image/jpeg")]
-                if let gifPath { files.append((gifPath, "animation.gif", "image/gif")) }
-                if let livePhotoPath { files.append((livePhotoPath, "livephoto.mov", "video/quicktime")) }
+                if let slideshowPath { files.append((slideshowPath, "slideshow.mp4", "video/mp4")) }
+                if let livePhotoPath { files.append((livePhotoPath, "livephoto.mp4", "video/mp4")) }
                 for (index, raw) in rawPaths.enumerated() {
                     files.append((raw, "photo-\(index + 1).jpg", "image/jpeg"))
                 }
