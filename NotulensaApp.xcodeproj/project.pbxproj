@@ -6,8 +6,28 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		ED0000000000000000000101 /* EDSDK.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = ED0000000000000000000001 /* EDSDK.framework */; };
+		ED0000000000000000000102 /* EDSDK.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = ED0000000000000000000001 /* EDSDK.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		ED0000000000000000000201 /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				ED0000000000000000000102 /* EDSDK.framework in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		8B779BAA3006A2DE0084F5F7 /* NotulensaApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NotulensaApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		ED0000000000000000000001 /* EDSDK.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = EDSDK.framework; path = Vendor/EDSDK.framework; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -23,6 +43,7 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				ED0000000000000000000101 /* EDSDK.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -33,6 +54,7 @@
 			isa = PBXGroup;
 			children = (
 				8B779BAC3006A2DE0084F5F7 /* NotulensaApp */,
+				ED0000000000000000000001 /* EDSDK.framework */,
 				8B779BAB3006A2DE0084F5F7 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -55,6 +77,7 @@
 				8B779BA63006A2DE0084F5F7 /* Sources */,
 				8B779BA73006A2DE0084F5F7 /* Frameworks */,
 				8B779BA83006A2DE0084F5F7 /* Resources */,
+				ED0000000000000000000201 /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
@@ -254,7 +277,9 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
+				FRAMEWORK_SEARCH_PATHS = "$(PROJECT_DIR)/Vendor";
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/Vendor/EDSDKHeaders";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Photobooth needs the camera to take photos during a session.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
@@ -280,6 +305,7 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "NotulensaApp/NotulensaApp-Bridging-Header.h";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";
@@ -300,7 +326,9 @@
 				ENABLE_HARDENED_RUNTIME = YES;
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SELECTED_FILES = readonly;
+				FRAMEWORK_SEARCH_PATHS = "$(PROJECT_DIR)/Vendor";
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/Vendor/EDSDKHeaders";
 				INFOPLIST_KEY_NSCameraUsageDescription = "Photobooth needs the camera to take photos during a session.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
@@ -326,6 +354,7 @@
 				SWIFT_APPROACHABLE_CONCURRENCY = YES;
 				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "NotulensaApp/NotulensaApp-Bridging-Header.h";
 				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
 				SWIFT_VERSION = 5.0;
 				TARGETED_DEVICE_FAMILY = "1,2,7";

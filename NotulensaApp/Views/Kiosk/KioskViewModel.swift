@@ -24,6 +24,11 @@ final class KioskViewModel {
 
     let event: Event
     let camera = CameraService()
+    let canon = CanonCameraService.shared
+    private let evfClipRecorder = EvfClipRecorder()
+
+    /// Canon body wins whenever one is plugged in; webcam otherwise.
+    var usesCanon: Bool { canon.isConnected }
 
     var state: State = .idle
     var template: PhotoTemplate?
@@ -113,30 +118,51 @@ final class KioskViewModel {
         captureTask = Task { [weak self] in
             guard let self else { return }
             let clipURL = FileManager.default.temporaryDirectory.appendingPathComponent("clip-\(UUID().uuidString).mov")
-            camera.startRecording(to: clipURL)
+            startClip(to: clipURL)
             for tick in stride(from: seconds, through: 1, by: -1) {
                 countdown = tick
                 try? await Task.sleep(for: .seconds(1))
                 if Task.isCancelled {
-                    _ = await camera.stopRecording()
+                    _ = await stopClip()
                     return
                 }
             }
             countdown = nil
+            // Stop the clip the moment the countdown ends — the live photo should be the
+            // posing during the countdown only. Stopping after takePhoto() would append a
+            // long frozen tail while the DSLR transfers the file (3–10s on the 600D).
+            let recorded = await stopClip()
             do {
-                async let photoTask = camera.capturePhoto()
-                let data = try await photoTask
+                let data = try await takePhoto()
                 shots[currentOrder] = data
-                if let recorded = await camera.stopRecording() {
+                if let recorded {
                     clips[currentOrder] = recorded
                 }
                 reviewShot = data
                 scheduleAutoAdvance()
             } catch {
-                _ = await camera.stopRecording()
                 errorMessage = "Capture failed: \(error.localizedDescription)"
             }
         }
+    }
+
+    // MARK: Camera source dispatch (webcam vs Canon EDSDK)
+
+    private func takePhoto() async throws -> Data {
+        usesCanon ? try await canon.capturePhoto() : try await camera.capturePhoto()
+    }
+
+    private func startClip(to url: URL) {
+        if usesCanon {
+            let canon = self.canon
+            evfClipRecorder.start(to: url) { canon.evfImage }
+        } else {
+            camera.startRecording(to: url)
+        }
+    }
+
+    private func stopClip() async -> URL? {
+        usesCanon ? await evfClipRecorder.stop() : await camera.stopRecording()
     }
 
     private func scheduleAutoAdvance() {

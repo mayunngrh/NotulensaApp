@@ -15,6 +15,7 @@ final class AppRouter {
 
 struct ContentView: View {
     @State private var router = AppRouter()
+    @State private var canon = CanonCameraService.shared
 
     var body: some View {
         Group {
@@ -25,6 +26,22 @@ struct ContentView: View {
             }
         }
         .environment(router)
+        .task {
+            canon.startMonitoring()
+        }
+        .overlay(alignment: .top) {
+            if let toast = canon.toast {
+                Label(toast, systemImage: "camera.badge.ellipsis")
+                    .font(.callout.bold())
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(.regularMaterial, in: Capsule())
+                    .shadow(radius: 8)
+                    .padding(.top, 16)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(duration: 0.4), value: canon.toast)
     }
 }
 

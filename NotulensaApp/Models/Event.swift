@@ -18,6 +18,8 @@ final class Event {
     var galleryButtonRelY: Double = 0.86
 
     // MARK: Capture settings
+    /// Camera source: "webcam" (AVFoundation) or "canon" (EDSDK — EOS 600D/RP over USB).
+    var cameraSource: String = "webcam"
     /// Countdown seconds before the first photo.
     var countdownFirst: Int = 5
     /// Countdown seconds before the remaining photos.

@@ -3,9 +3,24 @@ import SwiftUI
 /// Step 4 of event setup: countdown timing, review duration, GIF, and live photo settings.
 struct CaptureSettingsView: View {
     @Bindable var event: Event
+    @State private var canon = CanonCameraService.shared
 
     var body: some View {
         Form {
+            Section {
+                if let name = canon.cameraName {
+                    Label(name, systemImage: "camera.fill")
+                        .foregroundStyle(.green)
+                } else {
+                    Label("Webcam (no Canon camera detected)", systemImage: "web.camera")
+                        .foregroundStyle(.secondary)
+                }
+            } header: {
+                Text("Camera")
+            } footer: {
+                Text("Automatic: when a Canon EOS body (600D, RP, …) is plugged in via USB and turned on, it becomes the booth camera. Unplug it to fall back to the webcam.")
+            }
+
             Section {
                 Stepper("First photo: \(event.countdownFirst)s", value: $event.countdownFirst, in: 1...15)
                 Stepper("Other photos: \(event.countdownOthers)s", value: $event.countdownOthers, in: 1...15)

@@ -20,10 +20,14 @@ struct KioskView: View {
         .task {
             let vm = KioskViewModel(event: event)
             viewModel = vm
+            // Start both paths: Canon EVF streams only while a body is connected,
+            // and the webcam stays warm as the automatic fallback.
+            vm.canon.setEvfEnabled(true)
             await vm.camera.start()
             setFullscreen(true)
         }
         .onDisappear {
+            viewModel?.canon.setEvfEnabled(false)
             viewModel?.camera.stop()
         }
         .onExitCommand {

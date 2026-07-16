@@ -42,8 +42,28 @@ struct CaptureView: View {
 
     private var liveView: some View {
         ZStack {
-            CameraPreviewView(session: viewModel.camera.session)
+            if viewModel.usesCanon {
+                // Canon EVF: JPEG frames from the camera, redrawn as they arrive.
+                Group {
+                    if let frame = viewModel.canon.evfImage {
+                        Image(decorative: frame, scale: 1)
+                            .resizable()
+                            .scaledToFill()
+                    } else {
+                        VStack(spacing: 16) {
+                            ProgressView().controlSize(.large).tint(.white)
+                            Text(viewModel.canon.errorMessage ?? "Connecting to Canon camera…")
+                                .font(.title3)
+                                .foregroundStyle(.white.opacity(0.8))
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .ignoresSafeArea()
+            } else {
+                CameraPreviewView(session: viewModel.camera.session)
+                    .ignoresSafeArea()
+            }
             if let countdown = viewModel.countdown {
                 Text("\(countdown)")
                     .font(.system(size: 220, weight: .heavy))
