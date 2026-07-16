@@ -46,11 +46,15 @@ final class EvfClipRecorder {
         self.frameProvider = frameProvider
         frameIndex = 0
 
-        timer = Timer.scheduledTimer(withTimeInterval: 1.0 / Double(Self.fps), repeats: true) { _ in
+        // .common mode so recording doesn't stall while SwiftUI tracks animations/gestures.
+        let timer = Timer(timeInterval: 1.0 / Double(Self.fps), repeats: true) { _ in
             MainActor.assumeIsolated {
                 self.appendFrame()
             }
         }
+        timer.tolerance = 0.002
+        RunLoop.main.add(timer, forMode: .common)
+        self.timer = timer
     }
 
     func stop() async -> URL? {

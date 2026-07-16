@@ -114,6 +114,9 @@ final class KioskViewModel {
     // MARK: Capture
 
     func beginCountdown() {
+        // Nudge the DSLR awake before every countdown — a body that dozed between
+        // guests reconnects while the countdown runs instead of failing the shot.
+        canon.wake()
         reviewTask?.cancel()
         reviewShot = nil
         captureTask?.cancel()

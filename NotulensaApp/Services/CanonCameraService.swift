@@ -2,140 +2,151 @@ import Foundation
 import AppKit
 import CoreGraphics
 
-/// Canon EDSDK camera control, tuned for the EOS 600D (with the newer-body path kept
-/// for the EOS RP). Ported from memoribox's battle-tested edsdkManager:
+/// Canon EDSDK camera control, tuned for the EOS RP and 600D.
+///
+/// Threading model (matches Canon's own macOS sample): every EDSDK call runs on one
+/// dedicated serial queue (`sdkQueue`) — USB transfers and JPEG decodes never touch
+/// the main thread, which only receives finished CGImages and state updates. This is
+/// what keeps the preview at the camera's full EVF rate without lagging the UI.
+///
+/// Ported behaviors from memoribox's battle-tested edsdkManager:
 /// - SaveTo negotiation Both → Host → Camera (600D only accepts card-save)
 /// - photo retrieval via DirItemRequestTransfer (RP) or card-scan fallback (600D)
-/// - EVF live view polled every 50 ms
-/// All EDSDK calls happen on the main thread (the SDK's event pump requirement on macOS).
 @Observable
 @MainActor
 final class CanonCameraService {
     static let shared = CanonCameraService()
 
-    /// Latest live-view frame, ready to draw.
+    // MARK: Published state (main actor)
+
+    /// Latest live-view frame (read by the clip recorder).
     private(set) var evfImage: CGImage?
+    /// True once frames are flowing — the UI's "show preview vs spinner" flag.
+    private(set) var evfReady = false
+    /// Direct per-frame sink for the preview layer (bypasses SwiftUI re-rendering).
+    var evfFrameSink: ((CGImage) -> Void)?
     private(set) var isConnected = false
-    /// Human-readable model name (e.g. "Canon EOS 600D") once connected.
+    /// Human-readable model name (e.g. "Canon EOS RP") once connected.
     private(set) var cameraName: String?
     /// Transient connect/disconnect message for the UI toast; auto-clears.
     private(set) var toast: String?
     var errorMessage: String?
 
-    private var sdkInitialized = false
-    private var camera: EdsCameraRef?
-    private var eventTimer: Timer?
-    private var evfTimer: Timer?
-    private var detectTimer: Timer?
-    private var keepAliveTimer: Timer?
     private var toastTask: Task<Void, Never>?
-    /// Kiosk sets this; EVF only streams while it's on (and a camera is connected).
-    private var evfEnabled = false
 
-    // Capture state
-    private var photoContinuation: CheckedContinuation<Data, Error>?
-    private var preShotFilenames: Set<String> = []
-    private var captureTimeoutTask: Task<Void, Never>?
-    private var cardScanFallbackTask: Task<Void, Never>?
+    // MARK: SDK-thread state (touched only on sdkQueue)
+
+    private nonisolated let sdkQueue = DispatchQueue(label: "canon.edsdk", qos: .userInitiated)
+    nonisolated(unsafe) private var sdkInitialized = false
+    nonisolated(unsafe) private var camera: EdsCameraRef?
+    nonisolated(unsafe) private var connectedFlag = false
+    nonisolated(unsafe) private var evfActive = false
+    nonisolated(unsafe) private var evfStream: EdsStreamRef?
+    nonisolated(unsafe) private var eventPump: DispatchSourceTimer?
+    nonisolated(unsafe) private var evfLoop: DispatchSourceTimer?
+    nonisolated(unsafe) private var detectLoop: DispatchSourceTimer?
+    nonisolated(unsafe) private var keepAliveLoop: DispatchSourceTimer?
+    nonisolated(unsafe) private var photoContinuation: CheckedContinuation<Data, Error>?
+    nonisolated(unsafe) private var preShotFilenames: Set<String> = []
 
     // EDSDK constants (defined locally — the C #defines don't all import cleanly)
-    private let propSaveTo: EdsPropertyID = 0x0000000b
-    private let propEvfMode: EdsPropertyID = 0x0000_0501
-    private let propEvfOutputDevice: EdsPropertyID = 0x0000_0500
-    private let evfOutputPC: EdsUInt32 = 2
-    private let cmdTakePicture: EdsCameraCommand = 0x0000_0000
-    /// Resets the camera's auto power-off countdown — the EDSDK "keep awake" command.
-    private let cmdExtendShutDownTimer: EdsCameraCommand = 0x0000_0001
-    private let eventDirItemCreated: EdsObjectEvent = 0x0000_0204
-    private let eventDirItemRequestTransfer: EdsObjectEvent = 0x0000_0208
-    private let eventAll: EdsObjectEvent = 0x0000_0200
-    private let statusUILock: EdsCameraStatusCommand = 0x0000_0000
-    private let statusUIUnlock: EdsCameraStatusCommand = 0x0000_0001
+    private nonisolated static let propSaveTo: EdsPropertyID = 0x0000000b
+    private nonisolated static let propEvfMode: EdsPropertyID = 0x0000_0501
+    private nonisolated static let propEvfOutputDevice: EdsPropertyID = 0x0000_0500
+    private nonisolated static let evfOutputPC: EdsUInt32 = 2
+    private nonisolated static let cmdTakePicture: EdsCameraCommand = 0x0000_0000
+    private nonisolated static let cmdExtendShutDownTimer: EdsCameraCommand = 0x0000_0001
+    private nonisolated static let eventDirItemCreated: EdsObjectEvent = 0x0000_0204
+    private nonisolated static let eventDirItemRequestTransfer: EdsObjectEvent = 0x0000_0208
+    private nonisolated static let eventAllObject: EdsObjectEvent = 0x0000_0200
+    private nonisolated static let stateEventAll: EdsStateEvent = 0x0000_0300
+    private nonisolated static let stateEventShutdown: EdsStateEvent = 0x0000_0301
+    private nonisolated static let statusUILock: EdsCameraStatusCommand = 0x0000_0000
+    private nonisolated static let statusUIUnlock: EdsCameraStatusCommand = 0x0000_0001
+    /// Canon's sample pre-allocates the EVF buffer; avoids re-growing as frame sizes vary.
+    private nonisolated static let evfBufferSize: EdsUInt64 = 2 * 1024 * 1024
 
     // MARK: Lifecycle — app-wide auto-detection
 
-    /// Called once at app start: keeps watching for a Canon body being plugged in or removed.
-    /// When one is present it becomes the booth camera; otherwise the webcam is used.
+    /// Called once at app start: keeps watching for a Canon body being plugged in or
+    /// removed. When one is present it becomes the booth camera; otherwise the webcam.
     func startMonitoring() {
-        if !sdkInitialized {
-            guard EdsInitializeSDK() == EDS_ERR_OK else {
-                errorMessage = "Could not initialize the Canon SDK."
-                return
-            }
-            sdkInitialized = true
-        }
-        startEventPump()
-        guard detectTimer == nil else { return }
-        tryConnect()
-        detectTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { _ in
-            MainActor.assumeIsolated {
-                let service = CanonCameraService.shared
-                if !service.isConnected {
-                    service.tryConnect()
+        sdkQueue.async { [self] in
+            if !sdkInitialized {
+                guard EdsInitializeSDK() == EDS_ERR_OK else {
+                    Task { @MainActor in self.errorMessage = "Could not initialize the Canon SDK." }
+                    return
                 }
+                sdkInitialized = true
             }
+            startEventPump()
+            startDetectLoop()
+            startEvfLoop()
         }
     }
 
-    /// Wakes the camera before a session: resets its auto power-off timer, and if the
-    /// body already went to sleep (command fails), drops the dead session so the
-    /// detection loop reconnects within a couple of seconds.
+    /// Wakes the camera (resets its auto power-off timer). If the body already slept,
+    /// the dead session is dropped so the detection loop reconnects within seconds.
     func wake() {
-        guard isConnected, let camera else { return }
-        let result = EdsSendCommand(camera, cmdExtendShutDownTimer, 0)
-        if result != EDS_ERR_OK {
-            handleDisconnect()
+        sdkQueue.async { [self] in
+            guard connectedFlag, let camera else { return }
+            if EdsSendCommand(camera, Self.cmdExtendShutDownTimer, 0) != EDS_ERR_OK {
+                sdkHandleDisconnect()
+            }
         }
     }
 
     /// Kiosk turns live view on/off; keeps the camera cool + battery alive between events.
     func setEvfEnabled(_ enabled: Bool) {
-        evfEnabled = enabled
-        if enabled, isConnected {
-            startEvf()
-        } else {
-            stopEvf()
-        }
-    }
-
-    private func handleDisconnect() {
-        let name = cameraName ?? "Canon camera"
-        keepAliveTimer?.invalidate()
-        keepAliveTimer = nil
-        stopEvf()
-        if let camera {
-            EdsRelease(camera)
-            self.camera = nil
-        }
-        isConnected = false
-        cameraName = nil
-        evfImage = nil
-        finishCapture(.failure(CanonError.notConnected))
-        showToast("\(name) has been disconnected — switching to webcam")
-    }
-
-    private func showToast(_ message: String) {
-        toast = message
-        toastTask?.cancel()
-        toastTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(4))
-            if !Task.isCancelled { self?.toast = nil }
-        }
-    }
-
-    /// EDSDK delivers callbacks only while EdsGetEvent is pumped.
-    private func startEventPump() {
-        guard eventTimer == nil else { return }
-        eventTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
-            MainActor.assumeIsolated {
-                _ = EdsGetEvent()
+        sdkQueue.async { [self] in
+            evfActive = enabled
+            if connectedFlag {
+                enabled ? sdkStartEvf() : sdkStopEvf()
             }
         }
     }
 
-    // MARK: Connect
+    // MARK: SDK-thread timers
 
-    private func tryConnect() {
+    private nonisolated func makeTimer(interval: DispatchTimeInterval, leeway: DispatchTimeInterval, handler: @escaping () -> Void) -> DispatchSourceTimer {
+        let timer = DispatchSource.makeTimerSource(queue: sdkQueue)
+        timer.schedule(deadline: .now(), repeating: interval, leeway: leeway)
+        timer.setEventHandler(handler: handler)
+        timer.resume()
+        return timer
+    }
+
+    /// EDSDK delivers callbacks only while EdsGetEvent is pumped.
+    private nonisolated func startEventPump() {
+        guard eventPump == nil else { return }
+        eventPump = makeTimer(interval: .milliseconds(50), leeway: .milliseconds(10)) { [weak self] in
+            guard self != nil else { return }
+            _ = EdsGetEvent()
+        }
+    }
+
+    private nonisolated func startDetectLoop() {
+        guard detectLoop == nil else { return }
+        detectLoop = makeTimer(interval: .seconds(2), leeway: .milliseconds(200)) { [weak self] in
+            guard let self, !self.connectedFlag else { return }
+            self.sdkTryConnect()
+        }
+    }
+
+    /// EVF poll at ~120 Hz: when no new frame is ready EDSDK returns OBJECT_NOTREADY
+    /// immediately, so this catches every frame the body produces (~30 fps on the RP)
+    /// with minimal latency. Runs entirely on the SDK thread.
+    private nonisolated func startEvfLoop() {
+        guard evfLoop == nil else { return }
+        evfLoop = makeTimer(interval: .milliseconds(8), leeway: .milliseconds(2)) { [weak self] in
+            guard let self, self.connectedFlag, self.evfActive else { return }
+            self.sdkDownloadEvfFrame()
+        }
+    }
+
+    // MARK: Connect (SDK thread)
+
+    private nonisolated func sdkTryConnect() {
         var listRef: EdsCameraListRef?
         guard EdsGetCameraList(&listRef) == EDS_ERR_OK, let list = listRef else { return }
         defer { EdsRelease(list) }
@@ -158,106 +169,138 @@ final class CanonCameraService {
             return
         }
         camera = cam
-        cameraName = name.isEmpty ? "Canon camera" : name
+        let displayName = name.isEmpty ? "Canon camera" : name
 
-        // Disconnect notification (camera powered off or cable pulled).
-        let stateContext = Unmanaged.passUnretained(self).toOpaque()
+        let context = Unmanaged.passUnretained(self).toOpaque()
+
+        let objectHandler: EdsObjectEventHandler = { event, ref, ctx in
+            guard let ctx else { return EdsError(EDS_ERR_OK) }
+            let service = Unmanaged<CanonCameraService>.fromOpaque(ctx).takeUnretainedValue()
+            service.sdkHandleObjectEvent(event, ref: ref)
+            return EdsError(EDS_ERR_OK)
+        }
+        EdsSetObjectEventHandler(cam, Self.eventAllObject, objectHandler, context)
+
         let stateHandler: EdsStateEventHandler = { event, _, ctx in
             guard let ctx else { return EdsError(EDS_ERR_OK) }
             let service = Unmanaged<CanonCameraService>.fromOpaque(ctx).takeUnretainedValue()
-            MainActor.assumeIsolated {
-                if event == 0x0000_0301 /* kEdsStateEvent_Shutdown */ {
-                    service.handleDisconnect()
-                }
+            if event == CanonCameraService.stateEventShutdown {
+                service.sdkHandleDisconnect()
             }
             return EdsError(EDS_ERR_OK)
         }
-        EdsSetCameraStateEventHandler(cam, 0x0000_0300 /* kEdsStateEvent_All */, stateHandler, stateContext)
-
-        // Register for object events (photo-taken notifications).
-        let context = Unmanaged.passUnretained(self).toOpaque()
-        let handler: EdsObjectEventHandler = { event, ref, ctx in
-            guard let ctx else { return EdsError(EDS_ERR_OK) }
-            let service = Unmanaged<CanonCameraService>.fromOpaque(ctx).takeUnretainedValue()
-            MainActor.assumeIsolated {
-                service.handleObjectEvent(event, ref: ref)
-            }
-            return EdsError(EDS_ERR_OK)
-        }
-        EdsSetObjectEventHandler(cam, eventAll, handler, context)
+        EdsSetCameraStateEventHandler(cam, Self.stateEventAll, stateHandler, context)
 
         // SaveTo negotiation: Both/Host (newer bodies, direct-to-PC) → Camera (600D, card only).
         var accepted = false
         for var saveTo in [EdsUInt32(3 /* Both */), EdsUInt32(2 /* Host */)] {
-            if EdsSetPropertyData(cam, propSaveTo, 0, EdsUInt32(MemoryLayout<EdsUInt32>.size), &saveTo) == EDS_ERR_OK {
-                // Host-saving needs capacity announced.
-                EdsSendStatusCommand(cam, statusUILock, 0)
-                var capacity = EdsCapacity(numberOfFreeClusters: 0x7FFFFFFF, bytesPerSector: 0x1000, reset: 1)
+            if EdsSetPropertyData(cam, Self.propSaveTo, 0, EdsUInt32(MemoryLayout<EdsUInt32>.size), &saveTo) == EDS_ERR_OK {
+                EdsSendStatusCommand(cam, Self.statusUILock, 0)
+                let capacity = EdsCapacity(numberOfFreeClusters: 0x7FFFFFFF, bytesPerSector: 0x1000, reset: 1)
                 EdsSetCapacity(cam, capacity)
-                EdsSendStatusCommand(cam, statusUIUnlock, 0)
+                EdsSendStatusCommand(cam, Self.statusUIUnlock, 0)
                 accepted = true
                 break
             }
         }
         if !accepted {
             var saveTo = EdsUInt32(1 /* Camera — 600D path, photos land on the SD card */)
-            EdsSetPropertyData(cam, propSaveTo, 0, EdsUInt32(MemoryLayout<EdsUInt32>.size), &saveTo)
+            EdsSetPropertyData(cam, Self.propSaveTo, 0, EdsUInt32(MemoryLayout<EdsUInt32>.size), &saveTo)
         }
 
-        isConnected = true
-        showToast("\(cameraName ?? "Canon camera") has been connected")
-        if evfEnabled {
-            startEvf()
+        connectedFlag = true
+        if evfActive {
+            sdkStartEvf()
         }
+        startKeepAlive()
 
-        // Keep the body awake while connected (booths idle long enough for auto power-off).
-        keepAliveTimer?.invalidate()
-        keepAliveTimer = Timer.scheduledTimer(withTimeInterval: 60, repeats: true) { _ in
-            MainActor.assumeIsolated {
-                let service = CanonCameraService.shared
-                if service.isConnected, let cam = service.camera {
-                    EdsSendCommand(cam, service.cmdExtendShutDownTimer, 0)
-                }
-            }
+        Task { @MainActor in
+            self.isConnected = true
+            self.cameraName = displayName
+            self.showToast("\(displayName) has been connected")
         }
     }
 
-    // MARK: Live view (EVF)
+    /// Keep the body awake while connected (booths idle long enough for auto power-off).
+    private nonisolated func startKeepAlive() {
+        keepAliveLoop?.cancel()
+        keepAliveLoop = makeTimer(interval: .seconds(60), leeway: .seconds(5)) { [weak self] in
+            guard let self, self.connectedFlag, let cam = self.camera else { return }
+            EdsSendCommand(cam, Self.cmdExtendShutDownTimer, 0)
+        }
+    }
 
-    private func startEvf() {
+    private nonisolated func sdkHandleDisconnect() {
+        keepAliveLoop?.cancel()
+        keepAliveLoop = nil
+        sdkStopEvf()
+        if let camera {
+            EdsRelease(camera)
+            self.camera = nil
+        }
+        connectedFlag = false
+        if let continuation = photoContinuation {
+            photoContinuation = nil
+            continuation.resume(throwing: CanonError.notConnected)
+        }
+        Task { @MainActor in
+            let name = self.cameraName ?? "Canon camera"
+            self.isConnected = false
+            self.cameraName = nil
+            self.evfImage = nil
+            self.evfReady = false
+            self.showToast("\(name) has been disconnected — switching to webcam")
+        }
+    }
+
+    private func showToast(_ message: String) {
+        toast = message
+        toastTask?.cancel()
+        toastTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            if !Task.isCancelled { self?.toast = nil }
+        }
+    }
+
+    // MARK: Live view (SDK thread)
+
+    private nonisolated func sdkStartEvf() {
         guard let camera else { return }
         var mode: EdsUInt32 = 1
-        EdsSetPropertyData(camera, propEvfMode, 0, EdsUInt32(MemoryLayout<EdsUInt32>.size), &mode)
-        var device: EdsUInt32 = evfOutputPC
-        EdsSetPropertyData(camera, propEvfOutputDevice, 0, EdsUInt32(MemoryLayout<EdsUInt32>.size), &device)
-
-        evfTimer?.invalidate()
-        evfTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { _ in
-            MainActor.assumeIsolated {
-                CanonCameraService.shared.downloadEvfFrame()
+        EdsSetPropertyData(camera, Self.propEvfMode, 0, EdsUInt32(MemoryLayout<EdsUInt32>.size), &mode)
+        var device: EdsUInt32 = Self.evfOutputPC
+        EdsSetPropertyData(camera, Self.propEvfOutputDevice, 0, EdsUInt32(MemoryLayout<EdsUInt32>.size), &device)
+        if evfStream == nil {
+            var streamRef: EdsStreamRef?
+            if EdsCreateMemoryStream(Self.evfBufferSize, &streamRef) == EDS_ERR_OK {
+                evfStream = streamRef
             }
         }
     }
 
-    private func stopEvf() {
-        evfTimer?.invalidate()
-        evfTimer = nil
-        guard let camera else { return }
-        var device: EdsUInt32 = 0
-        EdsSetPropertyData(camera, propEvfOutputDevice, 0, EdsUInt32(MemoryLayout<EdsUInt32>.size), &device)
+    private nonisolated func sdkStopEvf() {
+        if let evfStream {
+            EdsRelease(evfStream)
+            self.evfStream = nil
+        }
+        if let camera {
+            var device: EdsUInt32 = 0
+            EdsSetPropertyData(camera, Self.propEvfOutputDevice, 0, EdsUInt32(MemoryLayout<EdsUInt32>.size), &device)
+        }
+        Task { @MainActor in
+            self.evfReady = false
+            self.evfImage = nil
+        }
     }
 
-    private func downloadEvfFrame() {
-        guard let camera else { return }
-        var streamRef: EdsStreamRef?
-        guard EdsCreateMemoryStream(0, &streamRef) == EDS_ERR_OK, let stream = streamRef else { return }
-        defer { EdsRelease(stream) }
+    private nonisolated func sdkDownloadEvfFrame() {
+        guard let camera, let stream = evfStream else { return }
 
         var evfRef: EdsEvfImageRef?
         guard EdsCreateEvfImageRef(stream, &evfRef) == EDS_ERR_OK, let evf = evfRef else { return }
         defer { EdsRelease(evf) }
 
-        // Fails harmlessly with OBJECT_NOTREADY until the camera starts streaming.
+        // Returns OBJECT_NOTREADY (cheaply) until the camera has a new frame.
         guard EdsDownloadEvfImage(camera, evf) == EDS_ERR_OK else { return }
 
         var pointer: UnsafeMutableRawPointer?
@@ -266,10 +309,18 @@ final class CanonCameraService {
         EdsGetLength(stream, &length)
         guard let pointer, length > 0 else { return }
 
+        // Decode here on the SDK thread — the main thread only receives the finished
+        // CGImage and hands it to the preview layer / clip recorder.
         let data = Data(bytes: pointer, count: Int(length))
-        if let source = CGImageSourceCreateWithData(data as CFData, nil),
-           let image = CGImageSourceCreateImageAtIndex(source, 0, nil) {
-            evfImage = image
+        let options = [kCGImageSourceShouldCache: false] as CFDictionary
+        guard let source = CGImageSourceCreateWithData(data as CFData, options),
+              let image = CGImageSourceCreateImageAtIndex(source, 0, options) else { return }
+
+        DispatchQueue.main.async {
+            let service = CanonCameraService.shared
+            service.evfImage = image
+            service.evfReady = true
+            service.evfFrameSink?(image)
         }
     }
 
@@ -277,95 +328,93 @@ final class CanonCameraService {
 
     /// Takes a photo and returns the full-resolution JPEG.
     /// RP path: camera pushes the file (DirItemRequestTransfer).
-    /// 600D path: photo lands on the SD card; we detect it by comparing card contents
+    /// 600D path: photo lands on the SD card; detected by comparing card contents
     /// against a snapshot taken just before the shutter.
     func capturePhoto() async throws -> Data {
-        guard let camera, isConnected else {
-            throw CanonError.notConnected
-        }
-        preShotFilenames = snapshotCardFilenames()
-
-        let result = EdsSendCommand(camera, cmdTakePicture, 0)
-        guard result == EDS_ERR_OK else {
-            throw CanonError.shutterFailed(result)
-        }
-
+        guard isConnected else { throw CanonError.notConnected }
         return try await withCheckedThrowingContinuation { continuation in
-            photoContinuation = continuation
+            sdkQueue.async { [self] in
+                guard connectedFlag, let camera else {
+                    continuation.resume(throwing: CanonError.notConnected)
+                    return
+                }
+                preShotFilenames = sdkSnapshotCardFilenames()
 
-            // 600D safety net: if no object event ever arrives, scan the card anyway.
-            cardScanFallbackTask = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(6))
-                guard let self, !Task.isCancelled, photoContinuation != nil else { return }
-                self.scanCardForNewPhoto()
-            }
-            // Hard timeout: the 600D can take a while writing to a slow SD card.
-            captureTimeoutTask = Task { [weak self] in
-                try? await Task.sleep(for: .seconds(30))
-                guard let self, !Task.isCancelled else { return }
-                self.finishCapture(.failure(CanonError.transferTimeout))
+                let result = EdsSendCommand(camera, Self.cmdTakePicture, 0)
+                guard result == EDS_ERR_OK else {
+                    continuation.resume(throwing: CanonError.shutterFailed(result))
+                    return
+                }
+                photoContinuation = continuation
+
+                // 600D safety net: if no object event ever arrives, scan the card anyway.
+                sdkQueue.asyncAfter(deadline: .now() + 6) { [weak self] in
+                    guard let self, self.photoContinuation != nil else { return }
+                    self.sdkScanCardForNewPhoto(attempt: 0)
+                }
+                // Hard timeout: slow SD cards can take a while.
+                sdkQueue.asyncAfter(deadline: .now() + 30) { [weak self] in
+                    guard let self else { return }
+                    self.sdkFinishCapture(.failure(CanonError.transferTimeout))
+                }
             }
         }
     }
 
-    private func finishCapture(_ result: Result<Data, Error>) {
-        captureTimeoutTask?.cancel()
-        cardScanFallbackTask?.cancel()
+    private nonisolated func sdkFinishCapture(_ result: Result<Data, Error>) {
         guard let continuation = photoContinuation else { return }
         photoContinuation = nil
         continuation.resume(with: result)
     }
 
-    private func handleObjectEvent(_ event: EdsObjectEvent, ref: EdsBaseRef?) {
+    private nonisolated func sdkHandleObjectEvent(_ event: EdsObjectEvent, ref: EdsBaseRef?) {
         switch event {
-        case eventDirItemRequestTransfer:
+        case Self.eventDirItemRequestTransfer:
             // Newer bodies (EOS RP): direct pull of the offered file.
             guard let ref else { return }
-            if let data = downloadDirectoryItem(ref) {
-                finishCapture(.success(data))
+            if let data = sdkDownloadDirectoryItem(ref) {
+                sdkFinishCapture(.success(data))
             }
             EdsRelease(ref)
-        case eventDirItemCreated:
+        case Self.eventDirItemCreated:
             // 600D: this ref is just a notification handle, not downloadable (err 0x61).
             // Give the camera time to finish writing, then scan the card.
             if let ref { EdsRelease(ref) }
-            Task { [weak self] in
-                try? await Task.sleep(for: .seconds(2.5))
-                self?.scanCardForNewPhoto()
+            sdkQueue.asyncAfter(deadline: .now() + 2.5) { [weak self] in
+                self?.sdkScanCardForNewPhoto(attempt: 0)
             }
         default:
             break
         }
     }
 
-    // MARK: Card scan (600D photo retrieval)
+    // MARK: Card scan (600D photo retrieval, SDK thread)
 
-    private func scanCardForNewPhoto() {
+    private nonisolated func sdkScanCardForNewPhoto(attempt: Int) {
         guard photoContinuation != nil else { return }
-        Task { [weak self] in
-            guard let self else { return }
-            // The 600D can take a couple of seconds to finish writing to a slow card.
-            for _ in 0..<6 {
-                if photoContinuation == nil { return }
-                if let item = findNewCardItem() {
-                    if let data = downloadDirectoryItem(item) {
-                        EdsRelease(item)
-                        finishCapture(.success(data))
-                        return
-                    }
-                    EdsRelease(item)
-                }
-                try? await Task.sleep(for: .seconds(1.5))
+        if let item = sdkFindNewCardItem() {
+            let data = sdkDownloadDirectoryItem(item)
+            EdsRelease(item)
+            if let data {
+                sdkFinishCapture(.success(data))
+                return
             }
-            finishCapture(.failure(CanonError.photoNotFoundOnCard))
+        }
+        // The 600D can take a couple of seconds to finish writing to a slow card.
+        if attempt < 6 {
+            sdkQueue.asyncAfter(deadline: .now() + 1.5) { [weak self] in
+                self?.sdkScanCardForNewPhoto(attempt: attempt + 1)
+            }
+        } else {
+            sdkFinishCapture(.failure(CanonError.photoNotFoundOnCard))
         }
     }
 
     /// Walks camera → volume → DCIM → subfolders and returns the first JPEG
     /// that wasn't on the card before the shutter. Caller releases the returned ref.
-    private func findNewCardItem() -> EdsDirectoryItemRef? {
+    private nonisolated func sdkFindNewCardItem() -> EdsDirectoryItemRef? {
         var newest: EdsDirectoryItemRef?
-        enumerateCardFiles { name, itemRef in
+        sdkEnumerateCardFiles { name, itemRef in
             if !preShotFilenames.contains(name), name.uppercased().hasSuffix(".JPG") {
                 if let previous = newest { EdsRelease(previous) }
                 EdsRetain(itemRef)
@@ -375,14 +424,14 @@ final class CanonCameraService {
         return newest
     }
 
-    private func snapshotCardFilenames() -> Set<String> {
+    private nonisolated func sdkSnapshotCardFilenames() -> Set<String> {
         var names: Set<String> = []
-        enumerateCardFiles { name, _ in names.insert(name) }
+        sdkEnumerateCardFiles { name, _ in names.insert(name) }
         return names
     }
 
     /// Calls `visit` for every file in every DCIM subfolder of the first volume.
-    private func enumerateCardFiles(_ visit: (String, EdsDirectoryItemRef) -> Void) {
+    private nonisolated func sdkEnumerateCardFiles(_ visit: (String, EdsDirectoryItemRef) -> Void) {
         guard let camera else { return }
         var volumeCount: EdsUInt32 = 0
         guard EdsGetChildCount(camera, &volumeCount) == EDS_ERR_OK, volumeCount > 0 else { return }
@@ -399,7 +448,7 @@ final class CanonCameraService {
 
             var folderInfo = EdsDirectoryItemInfo()
             guard EdsGetDirectoryItemInfo(folder, &folderInfo) == EDS_ERR_OK,
-                  itemName(folderInfo) == "DCIM" else { continue }
+                  Self.itemName(folderInfo) == "DCIM" else { continue }
 
             var subCount: EdsUInt32 = 0
             EdsGetChildCount(folder, &subCount)
@@ -415,7 +464,7 @@ final class CanonCameraService {
                     guard EdsGetChildAtIndex(sub, EdsInt32(fileIndex), &fileRef) == EDS_ERR_OK, let file = fileRef else { continue }
                     var fileInfo = EdsDirectoryItemInfo()
                     if EdsGetDirectoryItemInfo(file, &fileInfo) == EDS_ERR_OK {
-                        visit(itemName(fileInfo), file)
+                        visit(Self.itemName(fileInfo), file)
                     }
                     EdsRelease(file)
                 }
@@ -423,7 +472,7 @@ final class CanonCameraService {
         }
     }
 
-    private func downloadDirectoryItem(_ item: EdsBaseRef) -> Data? {
+    private nonisolated func sdkDownloadDirectoryItem(_ item: EdsBaseRef) -> Data? {
         var info = EdsDirectoryItemInfo()
         guard EdsGetDirectoryItemInfo(item, &info) == EDS_ERR_OK, info.size > 0 else { return nil }
 
@@ -442,7 +491,7 @@ final class CanonCameraService {
         return Data(bytes: pointer, count: Int(length))
     }
 
-    private func itemName(_ info: EdsDirectoryItemInfo) -> String {
+    private nonisolated static func itemName(_ info: EdsDirectoryItemInfo) -> String {
         withUnsafeBytes(of: info.szFileName) { raw in
             String(decoding: raw.prefix(while: { $0 != 0 }), as: UTF8.self)
         }

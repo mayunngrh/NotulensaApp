@@ -43,12 +43,10 @@ struct CaptureView: View {
     private var liveView: some View {
         ZStack {
             if viewModel.usesCanon {
-                // Canon EVF: JPEG frames from the camera, redrawn as they arrive.
+                // Canon EVF frames go straight into a CALayer — no SwiftUI re-render per frame.
                 Group {
-                    if let frame = viewModel.canon.evfImage {
-                        Image(decorative: frame, scale: 1)
-                            .resizable()
-                            .scaledToFill()
+                    if viewModel.canon.evfReady {
+                        CanonEvfPreviewView()
                     } else {
                         VStack(spacing: 16) {
                             ProgressView().controlSize(.large).tint(.white)
