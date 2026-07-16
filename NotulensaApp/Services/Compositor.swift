@@ -5,10 +5,13 @@ import CoreGraphics
 /// Composites captured photos into a template: slots sorted by layer, each photo
 /// cover-fit and rotated about its slot center, frame PNG at its own layer/rect.
 enum Compositor {
+    /// Fixed print output width: 3000×4500 px on the 4R (2:3) canvas — 750 dpi at 4×6 in.
+    static let printPixelWidth = 3000.0
+
     /// `photos[order]` = captured JPEG for that 1-based slot order.
-    /// Returns the relative path of the exported JPEG (long edge ≈ 3600 px for print).
+    /// Returns the relative path of the exported JPEG (always 3000×4500 for the 4R canvas).
     static func compose(template: PhotoTemplate, photos: [Int: Data], eventID: String) throws -> String {
-        let scale = min(2.0, 3600.0 / max(template.canvasWidth, template.canvasHeight))
+        let scale = printPixelWidth / template.canvasWidth
         var images: [Int: CGImage] = [:]
         for (order, data) in photos {
             images[order] = cgImage(from: data)

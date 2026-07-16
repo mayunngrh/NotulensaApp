@@ -9,6 +9,10 @@ final class CompositedPhoto {
     var gifPath: String?
     /// Relative path to the live photo video (looping slot clips in the template).
     var livePhotoPath: String?
+    /// Relative paths of the raw captured photos of this session.
+    var rawPhotoPaths: [String] = []
+    /// Public Google Drive folder link for this session, once uploaded.
+    var driveURL: String?
     var takenAt: Date
     var event: Event?
 

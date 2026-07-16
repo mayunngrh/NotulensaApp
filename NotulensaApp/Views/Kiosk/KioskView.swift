@@ -67,7 +67,7 @@ struct KioskView: View {
         case .processing:
             ProcessingView(message: vm.processingMessage)
         case .result(let result):
-            ResultView(result: result) {
+            ResultView(viewModel: vm, result: result) {
                 persistResult(vm)
                 vm.backToIdle()
             }
@@ -78,8 +78,11 @@ struct KioskView: View {
         guard let relPath = vm.pendingResultPath else { return }
         vm.pendingResultPath = nil
         let photo = CompositedPhoto(filePath: relPath, gifPath: vm.pendingGifPath, livePhotoPath: vm.pendingLivePhotoPath)
+        photo.rawPhotoPaths = vm.pendingRawPaths
+        photo.driveURL = vm.pendingDriveURL
         vm.pendingGifPath = nil
         vm.pendingLivePhotoPath = nil
+        vm.pendingRawPaths = []
         photo.event = event
         context.insert(photo)
         try? context.save()

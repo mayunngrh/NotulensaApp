@@ -41,9 +41,23 @@ final class KioskViewModel {
     var pendingResultPath: String?
     var pendingGifPath: String?
     var pendingLivePhotoPath: String?
+    var pendingRawPaths: [String] = []
+
+    // MARK: Google Drive upload
+    enum UploadState {
+        case idle
+        case notSignedIn
+        case uploading
+        case done(URL)
+        case failed(String)
+    }
+    var uploadState: UploadState = .idle
+    /// Drive folder link, persisted with the session record.
+    var pendingDriveURL: String?
 
     private var captureTask: Task<Void, Never>?
     private var reviewTask: Task<Void, Never>?
+    private var uploadTask: Task<Void, Never>?
 
     init(event: Event) {
         self.event = event
@@ -65,6 +79,8 @@ final class KioskViewModel {
         currentOrder = 1
         reviewShot = nil
         errorMessage = nil
+        uploadState = .idle
+        pendingDriveURL = nil
         if event.templates.count == 1 {
             template = event.templates[0]
             state = .capturing
@@ -189,14 +205,79 @@ final class KioskViewModel {
 
         for clip in clipsSnapshot.values { try? FileManager.default.removeItem(at: clip) }
 
+        // Keep the raw shots as part of the session (locally + for the Drive upload).
+        let stamp = Int(Date.now.timeIntervalSince1970)
+        var rawPaths: [String] = []
+        for (order, data) in shotsSnapshot.sorted(by: { $0.key < $1.key }) {
+            if let path = try? MediaStore.write(data, into: .sessions, subfolder: eventID, fileName: "raw-\(stamp)-\(order).jpg") {
+                rawPaths.append(path)
+            }
+        }
+
         pendingResultPath = printablePath
         pendingGifPath = gifPath
         pendingLivePhotoPath = livePhotoPath
+        pendingRawPaths = rawPaths
+        pendingDriveURL = nil
         state = .result(SessionResult(
             printableURL: MediaStore.url(for: printablePath),
             gifURL: gifPath.map { MediaStore.url(for: $0) },
             livePhotoURL: livePhotoPath.map { MediaStore.url(for: $0) }
         ))
+        startUpload(printablePath: printablePath, gifPath: gifPath, livePhotoPath: livePhotoPath, rawPaths: rawPaths)
+    }
+
+    // MARK: Drive upload — one folder per session with every output inside
+
+    private var lastUploadArgs: (printable: String, gif: String?, live: String?, raw: [String])?
+
+    func retryUpload() {
+        guard let args = lastUploadArgs else { return }
+        startUpload(printablePath: args.printable, gifPath: args.gif, livePhotoPath: args.live, rawPaths: args.raw)
+    }
+
+    private func startUpload(printablePath: String, gifPath: String?, livePhotoPath: String?, rawPaths: [String]) {
+        lastUploadArgs = (printablePath, gifPath, livePhotoPath, rawPaths)
+        let auth = GoogleAuthService.shared
+        guard auth.isSignedIn else {
+            uploadState = .notSignedIn
+            return
+        }
+        uploadState = .uploading
+        let eventName = event.name
+        uploadTask?.cancel()
+        uploadTask = Task { [weak self] in
+            do {
+                let token = try await auth.validAccessToken()
+                let drive = DriveUploader(accessToken: token)
+
+                // Master Folder → Event → Session hierarchy in the signed-in account's My Drive.
+                let rootID = try await drive.ensureFolder(name: auth.masterFolderName, parentID: nil)
+                let eventID = try await drive.ensureFolder(name: eventName, parentID: rootID)
+                let sessionName = Date.now.formatted(.dateTime.year().month().day().hour().minute().second())
+                    .replacingOccurrences(of: "/", with: "-")
+                let sessionID = try await drive.createFolder(name: "Session \(sessionName)", parentID: eventID)
+
+                var files: [(String, String, String)] = [(printablePath, "printable.jpg", "image/jpeg")]
+                if let gifPath { files.append((gifPath, "animation.gif", "image/gif")) }
+                if let livePhotoPath { files.append((livePhotoPath, "livephoto.mov", "video/quicktime")) }
+                for (index, raw) in rawPaths.enumerated() {
+                    files.append((raw, "photo-\(index + 1).jpg", "image/jpeg"))
+                }
+                for (relPath, name, mime) in files {
+                    try await drive.upload(fileURL: MediaStore.url(for: relPath), as: name, mimeType: mime, parentID: sessionID)
+                }
+                try await drive.makePublic(fileID: sessionID)
+
+                let link = DriveUploader.folderLink(id: sessionID)
+                self?.pendingDriveURL = link.absoluteString
+                self?.uploadState = .done(link)
+            } catch {
+                if !Task.isCancelled {
+                    self?.uploadState = .failed(error.localizedDescription)
+                }
+            }
+        }
     }
 
     private func frameRect(for template: PhotoTemplate) -> CGRect {

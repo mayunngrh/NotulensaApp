@@ -6,6 +6,7 @@ struct DashboardView: View {
     @Query(sort: \Event.createdAt, order: .reverse) private var events: [Event]
     @State private var showNewEvent = false
     @State private var newEventName = ""
+    @State private var showDriveSettings = false
     @State private var path = NavigationPath()
 
     var body: some View {
@@ -47,6 +48,16 @@ struct DashboardView: View {
                         Label("New Event", systemImage: "plus")
                     }
                 }
+                ToolbarItem {
+                    Button {
+                        showDriveSettings = true
+                    } label: {
+                        Label("Google Drive", systemImage: "icloud.and.arrow.up")
+                    }
+                }
+            }
+            .sheet(isPresented: $showDriveSettings) {
+                GoogleDriveSettingsView()
             }
             .alert("New Event", isPresented: $showNewEvent) {
                 TextField("Event name", text: $newEventName)

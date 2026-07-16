@@ -60,6 +60,12 @@ fastlane/test_output
 .env
 .env.*
 *.xcconfig.local
+# Google OAuth client files (from console.cloud.google.com)
+client_secret*.json
+credentials*.json
+*.credentials.json
+# Build-time secrets baked into the binary (copy Secrets.swift.example → this, fill in)
+NotulensaApp/Secrets.swift
 
 # =========================================
 # Local test exports (booth outputs saved

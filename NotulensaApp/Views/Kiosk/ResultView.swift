@@ -5,6 +5,7 @@ import AVKit
 /// Final session outputs — printable photo, GIF, live photo — with share options.
 /// Auto-returns to idle after a timeout.
 struct ResultView: View {
+    @Bindable var viewModel: KioskViewModel
     let result: SessionResult
     let onDone: () -> Void
 
@@ -133,19 +134,60 @@ struct ResultView: View {
         VStack(spacing: 20) {
             Text("Scan to Download")
                 .font(.title.bold())
-            if let qr = QRService.qrImage(for: QRService.shareURL(for: activeURL.lastPathComponent)) {
-                Image(nsImage: qr)
-                    .interpolation(.none)
-                    .resizable()
+
+            switch viewModel.uploadState {
+            case .done(let url):
+                if let qr = QRService.qrImage(for: url) {
+                    Image(nsImage: qr)
+                        .interpolation(.none)
+                        .resizable()
+                        .frame(width: 280, height: 280)
+                }
+                Text("All session photos, GIF, and live photo are in this Google Drive folder.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            case .uploading:
+                ProgressView()
+                    .controlSize(.large)
+                    .frame(width: 280, height: 280)
+                Text("Uploading your session to Google Drive…")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+            case .notSignedIn:
+                Image(systemName: "person.crop.circle.badge.exclamationmark")
+                    .font(.system(size: 80))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 280, height: 160)
+                Text("Google Drive is not connected. Sign in from the Dashboard (Google Drive settings) to enable QR sharing.")
+                    .font(.callout)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+            case .failed(let message):
+                Image(systemName: "exclamationmark.triangle")
+                    .font(.system(size: 80))
+                    .foregroundStyle(.orange)
+                    .frame(width: 280, height: 160)
+                Text("Upload failed: \(message)")
+                    .font(.callout)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+                Button {
+                    viewModel.retryUpload()
+                } label: {
+                    Label("Retry Upload", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+            case .idle:
+                ProgressView()
                     .frame(width: 280, height: 280)
             }
-            Text("(Mock QR — Google Drive upload coming later)")
-                .font(.caption)
-                .foregroundStyle(.secondary)
+
             Button("Close") { showQR = false }
                 .controlSize(.large)
         }
         .padding(40)
+        .frame(minWidth: 420)
     }
 
     private func restartIdleTimer() {
