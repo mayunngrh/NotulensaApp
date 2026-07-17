@@ -1,23 +1,25 @@
 import SwiftUI
-import SwiftData
 
 /// Split dashboard: event list on the left, read-only event overview on the right
 /// with Edit Event / Launch Event actions.
 struct DashboardView: View {
-    @Environment(\.modelContext) private var context
-    @Environment(AppRouter.self) private var router
-    @Query(sort: \Event.createdAt, order: .reverse) private var events: [Event]
+    @EnvironmentObject private var store: PhotoboothStore
+    @EnvironmentObject private var router: AppRouter
 
-    @State private var selectedEvent: Event?
+    @State private var selectedEventID: Event.ID?
     @State private var showNewEvent = false
     @State private var newEventName = ""
     @State private var showDriveSettings = false
     @State private var editingEvent: Event?
 
+    private var selectedEvent: Event? {
+        store.events.first { $0.id == selectedEventID }
+    }
+
     var body: some View {
         NavigationSplitView {
-            List(selection: $selectedEvent) {
-                ForEach(events) { event in
+            List(selection: $selectedEventID) {
+                ForEach(store.events) { event in
                     VStack(alignment: .leading, spacing: 4) {
                         Text(event.name).font(.headline)
                         Text("\(event.templates.count) template(s) · \(event.captures.count) session(s)")
@@ -28,14 +30,11 @@ struct DashboardView: View {
                             .foregroundStyle(.tertiary)
                     }
                     .padding(.vertical, 4)
-                    .tag(event)
+                    .tag(event.id)
                     .contextMenu {
                         Button("Edit Event") { editingEvent = event }
-                        Button("Delete Event", role: .destructive) { delete(event) }
+                        Button("Delete Event", role: .destructive) { store.deleteEvent(event) }
                     }
-                }
-                .onDelete { offsets in
-                    for index in offsets { delete(events[index]) }
                 }
             }
             .navigationTitle("Events")
@@ -65,12 +64,12 @@ struct DashboardView: View {
                     router.runningEvent = event
                 }
             } else {
-                ContentUnavailableView(
-                    "No Event Selected",
+                EmptyStateView(
+                    title: "No Event Selected",
                     systemImage: "camera.on.rectangle",
-                    description: Text(events.isEmpty
+                    message: store.events.isEmpty
                         ? "Create an event with the + button to get started."
-                        : "Select an event on the left to see its setup.")
+                        : "Select an event on the left to see its setup."
                 )
             }
         }
@@ -81,8 +80,8 @@ struct DashboardView: View {
                 let trimmed = newEventName.trimmingCharacters(in: .whitespaces)
                 guard !trimmed.isEmpty else { return }
                 let event = Event(name: trimmed)
-                context.insert(event)
-                selectedEvent = event
+                store.addEvent(event)
+                selectedEventID = event.id
                 editingEvent = event
             }
             Button("Cancel", role: .cancel) {}
@@ -94,34 +93,33 @@ struct DashboardView: View {
         }
         .sheet(item: $editingEvent) { event in
             NavigationStack {
-                EventDetailView(event: event)
-                    .toolbar {
-                        ToolbarItem(placement: .confirmationAction) {
-                            Button("Done") { editingEvent = nil }
-                        }
-                    }
+                EventDetailView(event: event) {
+                    editingEvent = nil
+                }
             }
             .frame(minWidth: 700, minHeight: 600)
         }
     }
+}
 
-    private func delete(_ event: Event) {
-        if selectedEvent === event { selectedEvent = nil }
-        for template in event.templates {
-            MediaStore.delete(relativePath: template.frameImagePath)
+/// Simple replacement for ContentUnavailableView (macOS 14+).
+struct EmptyStateView: View {
+    let title: String
+    let systemImage: String
+    let message: String
+
+    var body: some View {
+        VStack(spacing: 12) {
+            Image(systemName: systemImage)
+                .font(.system(size: 48))
+                .foregroundStyle(.secondary)
+            Text(title).font(.title2.bold())
+            Text(message)
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
         }
-        for capture in event.captures {
-            MediaStore.delete(relativePath: capture.filePath)
-            if let slideshow = capture.slideshowPath { MediaStore.delete(relativePath: slideshow) }
-            if let live = capture.livePhotoPath { MediaStore.delete(relativePath: live) }
-            for raw in capture.rawPhotoPaths { MediaStore.delete(relativePath: raw) }
-        }
-        if let idle = event.idleMediaPath {
-            MediaStore.delete(relativePath: idle)
-        }
-        if let background = event.welcomeBackgroundPath {
-            MediaStore.delete(relativePath: background)
-        }
-        context.delete(event)
+        .padding(40)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

@@ -4,7 +4,7 @@ import SwiftUI
 /// then sign in via the browser. Tokens live in the Keychain.
 struct GoogleDriveSettingsView: View {
     @Environment(\.dismiss) private var dismiss
-    @State private var auth = GoogleAuthService.shared
+    @ObservedObject private var auth = GoogleAuthService.shared
     @State private var clientID = ""
     @State private var clientSecret = ""
     @State private var masterFolder = ""
@@ -76,9 +76,9 @@ struct GoogleDriveSettingsView: View {
             clientSecret = auth.clientSecret
             masterFolder = auth.masterFolderName
         }
-        .onChange(of: clientID) { auth.clientID = clientID }
-        .onChange(of: clientSecret) { auth.clientSecret = clientSecret }
-        .onChange(of: masterFolder) { auth.masterFolderName = masterFolder }
+        .onChange(of: clientID) { _ in auth.clientID = clientID }
+        .onChange(of: clientSecret) { _ in auth.clientSecret = clientSecret }
+        .onChange(of: masterFolder) { _ in auth.masterFolderName = masterFolder }
     }
 
     private func signIn() {

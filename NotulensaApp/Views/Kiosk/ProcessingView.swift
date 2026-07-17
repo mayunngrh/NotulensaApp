@@ -7,7 +7,7 @@ struct ProcessingView: View {
     var body: some View {
         VStack(spacing: 24) {
             ProgressView()
-                .controlSize(.extraLarge)
+                .controlSize(.large)
                 .tint(.white)
             Text(message)
                 .font(.title2.bold())

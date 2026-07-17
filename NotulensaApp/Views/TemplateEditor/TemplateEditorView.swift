@@ -1,10 +1,10 @@
 import SwiftUI
-import SwiftData
+import Combine
 import AppKit
 
 struct TemplateEditorView: View {
-    @Bindable var template: PhotoTemplate
-    @Environment(\.modelContext) private var context
+    @ObservedObject var template: PhotoTemplate
+    @EnvironmentObject private var store: PhotoboothStore
     @State private var selectedSlot: PhotoSlot?
     @State private var selectedLayerID: AnyHashable?
 
@@ -57,39 +57,19 @@ struct TemplateEditorView: View {
                                     .frame(maxWidth: .infinity)
                             }
                             Button(role: .destructive) {
-                                selectedSlot = nil
-                                context.delete(slot)
-                                normalizeOrders(excluding: slot)
+                                deleteSlot(slot)
                             } label: {
                                 Label("Hapus", systemImage: "trash")
                                     .frame(maxWidth: .infinity)
                             }
+                            // A template must keep at least one photo slot.
+                            .disabled(template.slots.count <= 1)
                         }
                     }
                 }
                 if let slot = selectedSlot {
-                    let binding = Bindable(slot)
-                    Section("Posisi") {
-                        HStack {
-                            numberField("X", value: binding.x, range: -10000...10000)
-                            numberField("Y", value: binding.y, range: -10000...10000)
-                        }
-                    }
-                    Section("Ukuran") {
-                        HStack {
-                            numberField("Lebar", value: binding.width, range: 20...20000)
-                            numberField("Tinggi", value: binding.height, range: 20...20000)
-                        }
-                    }
-                    Section("Kemiringan") {
-                        HStack {
-                            numberField("Derajat", value: binding.rotation, range: -180...180)
-                            Slider(value: binding.rotation, in: -45...45, step: 1)
-                        }
-                    }
-                    Section("Foto") {
-                        Stepper("Photo # \(slot.order)", value: binding.order, in: 1...max(1, template.slots.count))
-                            .onChange(of: slot.order) { normalizeOrders() }
+                    SlotInspectorSections(slot: slot, slotCount: template.slots.count) {
+                        normalizeOrders()
                     }
                 } else {
                     Section {
@@ -114,8 +94,8 @@ struct TemplateEditorView: View {
 
         var id: AnyHashable {
             switch self {
-            case .frame: "frame"
-            case .slot(let slot): slot.persistentModelID
+            case .frame: AnyHashable("frame")
+            case .slot(let slot): AnyHashable(slot.id)
             }
         }
     }
@@ -137,16 +117,16 @@ struct TemplateEditorView: View {
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
-            .onChange(of: selectedLayerID) {
+            .onChange(of: selectedLayerID) { _ in
                 if selectedLayerID == AnyHashable("frame") {
                     selectedSlot = nil
-                } else if let slot = template.slots.first(where: { AnyHashable($0.persistentModelID) == selectedLayerID }) {
+                } else if let slot = template.slots.first(where: { AnyHashable($0.id) == selectedLayerID }) {
                     selectedSlot = slot
                 }
             }
-            .onChange(of: selectedSlot) {
+            .onChange(of: selectedSlot) { _ in
                 if let slot = selectedSlot {
-                    selectedLayerID = AnyHashable(slot.persistentModelID)
+                    selectedLayerID = AnyHashable(slot.id)
                 }
             }
             Text("Drag rows to reorder — the top row is drawn in front.")
@@ -194,6 +174,8 @@ struct TemplateEditorView: View {
             case .slot(let slot): slot.layer = layer
             }
         }
+        template.objectWillChange.send()
+        store.save()
     }
 
     private func layerCard(title: String, icon: String, tint: Color, selected: Bool) -> some View {
@@ -212,15 +194,6 @@ struct TemplateEditorView: View {
 
     // MARK: Slot actions
 
-    private func numberField(_ label: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
-        TextField(label, value: Binding(
-            get: { value.wrappedValue },
-            set: { value.wrappedValue = min(max($0, range.lowerBound), range.upperBound) }
-        ), format: .number.precision(.fractionLength(0)))
-        .textFieldStyle(.roundedBorder)
-        .frame(minWidth: 60)
-    }
-
     private func copySlot(_ source: PhotoSlot) {
         let copy = PhotoSlot(
             order: source.order,
@@ -231,19 +204,25 @@ struct TemplateEditorView: View {
             rotation: source.rotation,
             layer: source.layer
         )
-        copy.template = template
-        context.insert(copy)
+        template.slots.append(copy)
         selectedSlot = copy
+        store.save()
+    }
+
+    private func deleteSlot(_ slot: PhotoSlot) {
+        selectedSlot = nil
+        template.slots.removeAll { $0 === slot }
+        normalizeOrders()
+        store.save()
     }
 
     /// Keeps photo numbers consecutive (1, 2, 3…): deleting Photo 2 turns Photo 3 into Photo 2.
-    /// Slots sharing a number keep sharing after renumbering.
-    private func normalizeOrders(excluding deleted: PhotoSlot? = nil) {
-        let remaining = template.slots.filter { $0 !== deleted }
-        let ranks = Set(remaining.map(\.order)).sorted()
-        for slot in remaining {
+    private func normalizeOrders() {
+        let ranks = Set(template.slots.map(\.order)).sorted()
+        for slot in template.slots {
             slot.order = (ranks.firstIndex(of: slot.order) ?? 0) + 1
         }
+        template.objectWillChange.send()
     }
 
     private func addSlot() {
@@ -256,8 +235,49 @@ struct TemplateEditorView: View {
             height: template.canvasHeight * 0.3,
             layer: template.slots.count
         )
-        slot.template = template
-        context.insert(slot)
+        template.slots.append(slot)
         selectedSlot = slot
+        store.save()
+    }
+}
+
+/// Numeric inspector for the selected slot; observes the slot so edits reflect live.
+private struct SlotInspectorSections: View {
+    @ObservedObject var slot: PhotoSlot
+    let slotCount: Int
+    let onOrderChange: () -> Void
+
+    var body: some View {
+        Section("Posisi") {
+            HStack {
+                numberField("X", value: $slot.x, range: -10000...10000)
+                numberField("Y", value: $slot.y, range: -10000...10000)
+            }
+        }
+        Section("Ukuran") {
+            HStack {
+                numberField("Lebar", value: $slot.width, range: 20...20000)
+                numberField("Tinggi", value: $slot.height, range: 20...20000)
+            }
+        }
+        Section("Kemiringan") {
+            HStack {
+                numberField("Derajat", value: $slot.rotation, range: -180...180)
+                Slider(value: $slot.rotation, in: -45...45, step: 1)
+            }
+        }
+        Section("Foto") {
+            Stepper("Photo # \(slot.order)", value: $slot.order, in: 1...max(1, slotCount))
+                .onChange(of: slot.order) { _ in onOrderChange() }
+        }
+    }
+
+    private func numberField(_ label: String, value: Binding<Double>, range: ClosedRange<Double>) -> some View {
+        TextField(label, value: Binding(
+            get: { value.wrappedValue },
+            set: { value.wrappedValue = min(max($0, range.lowerBound), range.upperBound) }
+        ), format: .number.precision(.fractionLength(0)))
+        .textFieldStyle(.roundedBorder)
+        .frame(minWidth: 60)
     }
 }

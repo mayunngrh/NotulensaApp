@@ -1,122 +1,132 @@
 import Foundation
 import AVFoundation
 import CoreGraphics
-import AppKit
 
-/// Records the Canon EVF live-view frames into a video clip (for the live photo output).
-/// Frames are drawn cover-fit onto a fixed 1280×720 canvas at 30 fps — fixed size because
-/// Canon's EVF delivers frames at varying sizes depending on the body.
-@MainActor
-final class EvfClipRecorder {
+/// Records Canon EVF live-view frames into a video clip (for the live photo output).
+///
+/// Frame-tap driven: `CanonCameraService.frameTap` fires on the SDK thread at the
+/// camera's real cadence, and each frame is encoded here with its true timestamp — so
+/// the clip captures every frame the RP delivers (~30 fps) with correct motion timing,
+/// rather than polling at a fixed rate and duplicating/dropping frames.
+///
+/// All AVAssetWriter work happens on a dedicated serial queue, never the main thread.
+final class EvfClipRecorder: @unchecked Sendable {
     private static let width = 1280
     private static let height = 720
-    private static let fps: Int32 = 30
 
+    private let queue = DispatchQueue(label: "evf.clip.recorder")
     private var writer: AVAssetWriter?
     private var input: AVAssetWriterInput?
     private var adaptor: AVAssetWriterInputPixelBufferAdaptor?
-    private var timer: Timer?
-    private var frameIndex: Int64 = 0
+    private var pixelBufferPool: CVPixelBufferPool?
+    private var startTime: CFTimeInterval = 0
+    private var frameCount = 0
     private var outputURL: URL?
-    private var frameProvider: (() -> CGImage?)?
 
-    func start(to url: URL, frameProvider: @escaping () -> CGImage?) {
-        stopTimer()
-        try? FileManager.default.removeItem(at: url)
-        guard let writer = try? AVAssetWriter(outputURL: url, fileType: .mov) else { return }
-        let settings: [String: Any] = [
-            AVVideoCodecKey: AVVideoCodecType.h264,
-            AVVideoWidthKey: Self.width,
-            AVVideoHeightKey: Self.height
-        ]
-        let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
-        input.expectsMediaDataInRealTime = true
-        let adaptor = AVAssetWriterInputPixelBufferAdaptor(
-            assetWriterInput: input,
-            sourcePixelBufferAttributes: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB]
-        )
-        writer.add(input)
-        writer.startWriting()
-        writer.startSession(atSourceTime: .zero)
+    /// Begins recording. Returns a closure to install as the camera's `frameTap`.
+    func start(to url: URL) -> (CGImage) -> Void {
+        queue.sync {
+            try? FileManager.default.removeItem(at: url)
+            guard let writer = try? AVAssetWriter(outputURL: url, fileType: .mp4) else { return }
+            let settings: [String: Any] = [
+                AVVideoCodecKey: AVVideoCodecType.h264,
+                AVVideoWidthKey: Self.width,
+                AVVideoHeightKey: Self.height
+            ]
+            let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
+            input.expectsMediaDataInRealTime = true
+            let adaptor = AVAssetWriterInputPixelBufferAdaptor(
+                assetWriterInput: input,
+                sourcePixelBufferAttributes: [
+                    kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32ARGB,
+                    kCVPixelBufferWidthKey as String: Self.width,
+                    kCVPixelBufferHeightKey as String: Self.height
+                ]
+            )
+            writer.add(input)
+            writer.startWriting()
+            writer.startSession(atSourceTime: .zero)
 
-        self.writer = writer
-        self.input = input
-        self.adaptor = adaptor
-        self.outputURL = url
-        self.frameProvider = frameProvider
-        frameIndex = 0
-
-        // .common mode so recording doesn't stall while SwiftUI tracks animations/gestures.
-        let timer = Timer(timeInterval: 1.0 / Double(Self.fps), repeats: true) { _ in
-            MainActor.assumeIsolated {
-                self.appendFrame()
-            }
+            self.writer = writer
+            self.input = input
+            self.adaptor = adaptor
+            self.pixelBufferPool = adaptor.pixelBufferPool
+            self.outputURL = url
+            self.startTime = CACurrentMediaTime()
+            self.frameCount = 0
         }
-        timer.tolerance = 0.002
-        RunLoop.main.add(timer, forMode: .common)
-        self.timer = timer
+        return { [weak self] image in
+            self?.appendFrame(image)
+        }
+    }
+
+    /// Called on the SDK thread by the camera's frameTap.
+    private func appendFrame(_ image: CGImage) {
+        queue.async { [self] in
+            guard let input, let adaptor, input.isReadyForMoreMediaData,
+                  let buffer = makeBuffer(from: image) else { return }
+            let elapsed = CACurrentMediaTime() - startTime
+            let time = CMTime(seconds: elapsed, preferredTimescale: 600)
+            adaptor.append(buffer, withPresentationTime: time)
+            frameCount += 1
+        }
     }
 
     func stop() async -> URL? {
-        stopTimer()
-        guard let writer, let input, frameIndex > 0 else {
-            cleanup()
-            return nil
+        await withCheckedContinuation { continuation in
+            queue.async { [self] in
+                guard let writer, let input, frameCount > 0 else {
+                    cleanup()
+                    continuation.resume(returning: nil)
+                    return
+                }
+                input.markAsFinished()
+                writer.finishWriting { [self] in
+                    let url = outputURL
+                    cleanup()
+                    continuation.resume(returning: url)
+                }
+            }
         }
-        input.markAsFinished()
-        await writer.finishWriting()
-        let url = outputURL
-        cleanup()
-        return url
-    }
-
-    private func appendFrame() {
-        guard let input, let adaptor, input.isReadyForMoreMediaData,
-              let frame = frameProvider?(),
-              let buffer = Self.pixelBuffer(from: frame) else { return }
-        let time = CMTime(value: CMTimeValue(frameIndex), timescale: Self.fps)
-        adaptor.append(buffer, withPresentationTime: time)
-        frameIndex += 1
-    }
-
-    private func stopTimer() {
-        timer?.invalidate()
-        timer = nil
     }
 
     private func cleanup() {
         writer = nil
         input = nil
         adaptor = nil
+        pixelBufferPool = nil
         outputURL = nil
-        frameProvider = nil
     }
 
-    /// Draws the frame cover-fit into a fixed 1280×720 buffer.
-    private static func pixelBuffer(from image: CGImage) -> CVPixelBuffer? {
+    /// Draws the frame cover-fit into a pooled 1280×720 buffer.
+    private func makeBuffer(from image: CGImage) -> CVPixelBuffer? {
         var bufferRef: CVPixelBuffer?
-        let attrs = [kCVPixelBufferCGImageCompatibilityKey: true, kCVPixelBufferCGBitmapContextCompatibilityKey: true] as CFDictionary
-        CVPixelBufferCreate(kCFAllocatorDefault, width, height, kCVPixelFormatType_32ARGB, attrs, &bufferRef)
+        if let pool = pixelBufferPool {
+            CVPixelBufferPoolCreatePixelBuffer(kCFAllocatorDefault, pool, &bufferRef)
+        }
+        if bufferRef == nil {
+            CVPixelBufferCreate(kCFAllocatorDefault, Self.width, Self.height, kCVPixelFormatType_32ARGB,
+                                [kCVPixelBufferCGBitmapContextCompatibilityKey: true] as CFDictionary, &bufferRef)
+        }
         guard let buffer = bufferRef else { return nil }
         CVPixelBufferLockBaseAddress(buffer, [])
         defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
         guard let ctx = CGContext(
             data: CVPixelBufferGetBaseAddress(buffer),
-            width: width, height: height,
+            width: Self.width, height: Self.height,
             bitsPerComponent: 8, bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
             space: CGColorSpaceCreateDeviceRGB(),
             bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
         ) else { return nil }
 
         let imageW = CGFloat(image.width), imageH = CGFloat(image.height)
-        let scale = max(CGFloat(width) / imageW, CGFloat(height) / imageH)
-        let drawRect = CGRect(
-            x: (CGFloat(width) - imageW * scale) / 2,
-            y: (CGFloat(height) - imageH * scale) / 2,
+        let scale = max(CGFloat(Self.width) / imageW, CGFloat(Self.height) / imageH)
+        ctx.draw(image, in: CGRect(
+            x: (CGFloat(Self.width) - imageW * scale) / 2,
+            y: (CGFloat(Self.height) - imageH * scale) / 2,
             width: imageW * scale,
             height: imageH * scale
-        )
-        ctx.draw(image, in: drawRect)
+        ))
         return buffer
     }
 }

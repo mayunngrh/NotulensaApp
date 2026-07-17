@@ -1,34 +1,34 @@
 import SwiftUI
-import SwiftData
 import AppKit
 
 /// Fullscreen kiosk container: owns the session state machine for a running event.
 struct KioskView: View {
     let event: Event
-    @Environment(AppRouter.self) private var router
-    @Environment(\.modelContext) private var context
-    @State private var viewModel: KioskViewModel?
+    @EnvironmentObject private var router: AppRouter
+    @EnvironmentObject private var store: PhotoboothStore
+    @StateObject private var viewModel: KioskViewModel
+
+    init(event: Event) {
+        self.event = event
+        _viewModel = StateObject(wrappedValue: KioskViewModel(event: event))
+    }
 
     var body: some View {
         ZStack {
             Color.black.ignoresSafeArea()
-            if let vm = viewModel {
-                content(vm)
-            }
+            content(viewModel)
         }
         .preferredColorScheme(.dark)
         .task {
-            let vm = KioskViewModel(event: event)
-            viewModel = vm
             // Start both paths: Canon EVF streams only while a body is connected,
             // and the webcam stays warm as the automatic fallback.
-            vm.canon.setEvfEnabled(true)
-            await vm.camera.start()
+            viewModel.canon.setEvfEnabled(true)
+            await viewModel.camera.start()
             setFullscreen(true)
         }
         .onDisappear {
-            viewModel?.canon.setEvfEnabled(false)
-            viewModel?.camera.stop()
+            viewModel.canon.setEvfEnabled(false)
+            viewModel.camera.stop()
         }
         .onExitCommand {
             exitKiosk()
@@ -87,13 +87,12 @@ struct KioskView: View {
         vm.pendingLivePhotoPath = nil
         vm.pendingSlideshowPath = nil
         vm.pendingRawPaths = []
-        photo.event = event
-        context.insert(photo)
-        try? context.save()
+        event.captures.append(photo)
+        store.save()
     }
 
     private func exitKiosk() {
-        viewModel?.backToIdle()
+        viewModel.backToIdle()
         setFullscreen(false)
         router.runningEvent = nil
     }

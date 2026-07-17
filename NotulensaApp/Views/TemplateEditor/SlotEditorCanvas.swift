@@ -2,19 +2,16 @@ import SwiftUI
 import AppKit
 
 /// Editing surface: black 4R canvas, frame PNG at its own rect/layer, photo slots as
-/// draggable/resizable overlays. Slot values are in canvas coordinates; view = canvas * scale.
-/// All drag gestures work in the fixed "canvas" coordinate space so views moving under the
-/// cursor don't distort the drag.
+/// draggable/resizable overlays. Each slot is its own observed subview so mutations
+/// (drag/resize) refresh immediately without SwiftData/Observation (Ventura-compatible).
 struct SlotEditorCanvas: View {
-    @Bindable var template: PhotoTemplate
+    @ObservedObject var template: PhotoTemplate
     @Binding var selectedSlot: PhotoSlot?
     var frameSelected: Bool = false
 
-    @State private var dragStart: CGPoint?
-    @State private var resizeStart: CGSize?
     @State private var frameDragStart: CGPoint?
 
-    private static let space = "slot-editor-canvas"
+    static let space = "slot-editor-canvas"
 
     var body: some View {
         GeometryReader { geo in
@@ -28,13 +25,13 @@ struct SlotEditorCanvas: View {
                     .frame(width: canvasSize.width, height: canvasSize.height)
 
                 ForEach(template.sortedSlots.filter { $0.layer < template.frameLayer }) { slot in
-                    slotView(slot, scale: scale)
+                    SlotBoxView(slot: slot, template: template, scale: scale, selectedSlot: $selectedSlot)
                 }
 
                 frameImage(scale: scale)
 
                 ForEach(template.sortedSlots.filter { $0.layer >= template.frameLayer }) { slot in
-                    slotView(slot, scale: scale)
+                    SlotBoxView(slot: slot, template: template, scale: scale, selectedSlot: $selectedSlot)
                 }
             }
             .coordinateSpace(name: Self.space)
@@ -71,7 +68,6 @@ struct SlotEditorCanvas: View {
                 guard frameSelected else { return }
                 if frameDragStart == nil {
                     frameDragStart = rect.origin
-                    // First drag pins the auto-fit rect into stored values.
                     template.frameWidth = rect.width
                     template.frameHeight = rect.height
                 }
@@ -81,12 +77,21 @@ struct SlotEditorCanvas: View {
             }
             .onEnded { _ in frameDragStart = nil }
     }
+}
 
-    // MARK: Photo slots
+/// One photo slot: observes its own slot so drag/resize redraw instantly.
+private struct SlotBoxView: View {
+    @ObservedObject var slot: PhotoSlot
+    let template: PhotoTemplate
+    let scale: CGFloat
+    @Binding var selectedSlot: PhotoSlot?
 
-    @ViewBuilder
-    private func slotView(_ slot: PhotoSlot, scale: CGFloat) -> some View {
-        let isSelected = slot === selectedSlot
+    @State private var dragStart: CGPoint?
+    @State private var resizeStart: CGSize?
+
+    private var isSelected: Bool { slot === selectedSlot }
+
+    var body: some View {
         let w = slot.width * scale
         let h = slot.height * scale
 
@@ -111,18 +116,18 @@ struct SlotEditorCanvas: View {
                     )
                     .frame(width: 22, height: 22)
                     .offset(x: 11, y: 11)
-                    .gesture(resizeGesture(slot, scale: scale))
+                    .gesture(resizeGesture)
             }
         }
         .frame(width: w, height: h)
         .rotationEffect(.degrees(slot.rotation))
         .offset(x: slot.x * scale, y: slot.y * scale)
         .onTapGesture { selectedSlot = slot }
-        .gesture(moveGesture(slot, scale: scale))
+        .gesture(moveGesture)
     }
 
-    private func moveGesture(_ slot: PhotoSlot, scale: CGFloat) -> some Gesture {
-        DragGesture(coordinateSpace: .named(Self.space))
+    private var moveGesture: some Gesture {
+        DragGesture(coordinateSpace: .named(SlotEditorCanvas.space))
             .onChanged { value in
                 selectedSlot = slot
                 if dragStart == nil { dragStart = CGPoint(x: slot.x, y: slot.y) }
@@ -135,12 +140,11 @@ struct SlotEditorCanvas: View {
             .onEnded { _ in dragStart = nil }
     }
 
-    private func resizeGesture(_ slot: PhotoSlot, scale: CGFloat) -> some Gesture {
-        DragGesture(coordinateSpace: .named(Self.space))
+    private var resizeGesture: some Gesture {
+        DragGesture(coordinateSpace: .named(SlotEditorCanvas.space))
             .onChanged { value in
                 if resizeStart == nil { resizeStart = CGSize(width: slot.width, height: slot.height) }
                 guard let start = resizeStart else { return }
-                // Rotate the canvas-space drag delta into the slot's local axes.
                 let angle = -slot.rotation * .pi / 180
                 let dx = (value.translation.width * cos(angle) - value.translation.height * sin(angle)) / scale
                 let dy = (value.translation.width * sin(angle) + value.translation.height * cos(angle)) / scale

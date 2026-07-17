@@ -1,16 +1,16 @@
 import Foundation
+import Combine
 import AVFoundation
 import AppKit
 
-@Observable
 @MainActor
-final class CameraService {
+final class CameraService: ObservableObject {
     let session = AVCaptureSession()
     private let photoOutput = AVCapturePhotoOutput()
     private let movieOutput = AVCaptureMovieFileOutput()
     private var movieDelegate: MovieRecordingDelegate?
-    private(set) var isConfigured = false
-    var errorMessage: String?
+    @Published private(set) var isConfigured = false
+    @Published var errorMessage: String?
 
     func start() async {
         guard await requestAccess() else {
@@ -39,12 +39,17 @@ final class CameraService {
     }
 
     private func configure() {
+        // .external / .continuityCamera are macOS 14+; fall back to any video device on 13.
+        var deviceTypes: [AVCaptureDevice.DeviceType] = [.builtInWideAngleCamera]
+        if #available(macOS 14.0, *) {
+            deviceTypes.append(contentsOf: [.external, .continuityCamera])
+        }
         let discovery = AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.builtInWideAngleCamera, .external, .continuityCamera],
+            deviceTypes: deviceTypes,
             mediaType: .video,
             position: .unspecified
         )
-        guard let device = discovery.devices.first else {
+        guard let device = discovery.devices.first ?? AVCaptureDevice.default(for: .video) else {
             errorMessage = "No camera found."
             return
         }

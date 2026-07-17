@@ -6,7 +6,6 @@
 //
 
 import SwiftUI
-import SwiftData
 
 @main
 struct NotulensaAppApp: App {
@@ -14,6 +13,5 @@ struct NotulensaAppApp: App {
         WindowGroup {
             ContentView()
         }
-        .modelContainer(for: [Event.self, PhotoTemplate.self, PhotoSlot.self, CompositedPhoto.self])
     }
 }

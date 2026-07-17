@@ -1,6 +1,6 @@
 import Foundation
+import Combine
 import SwiftUI
-import SwiftData
 import AVFoundation
 
 struct SessionResult {
@@ -9,9 +9,8 @@ struct SessionResult {
     let livePhotoURL: URL?
 }
 
-@Observable
 @MainActor
-final class KioskViewModel {
+final class KioskViewModel: ObservableObject {
     enum State {
         case idle
         case welcome
@@ -30,18 +29,18 @@ final class KioskViewModel {
     /// Canon body wins whenever one is plugged in; webcam otherwise.
     var usesCanon: Bool { canon.isConnected }
 
-    var state: State = .idle
+    @Published var state: State = .idle
     var template: PhotoTemplate?
     /// Captured JPEGs keyed by 1-based slot order.
     var shots: [Int: Data] = [:]
     /// Recorded video clip per slot order (for the live photo export).
     var clips: [Int: URL] = [:]
-    var currentOrder = 1
+    @Published var currentOrder = 1
     /// nil = live preview, counting down when set; shot under review when reviewShot != nil.
-    var countdown: Int?
-    var reviewShot: Data?
-    var errorMessage: String?
-    var processingMessage: String = "Preparing your photos…"
+    @Published var countdown: Int?
+    @Published var reviewShot: Data?
+    @Published var errorMessage: String?
+    @Published var processingMessage: String = "Preparing your photos…"
     /// Set when a new result should be persisted into the event gallery.
     var pendingResultPath: String?
     var pendingLivePhotoPath: String?
@@ -56,9 +55,9 @@ final class KioskViewModel {
         case done(URL)
         case failed(String)
     }
-    var uploadState: UploadState = .idle
+    @Published var uploadState: UploadState = .idle
     /// Public session-folder link — ready right after the session starts, before any upload.
-    var driveLink: URL?
+    @Published var driveLink: URL?
     /// Drive folder link, persisted with the session record.
     var pendingDriveURL: String?
 
@@ -160,15 +159,20 @@ final class KioskViewModel {
 
     private func startClip(to url: URL) {
         if usesCanon {
-            let canon = self.canon
-            evfClipRecorder.start(to: url) { canon.evfImage }
+            // Feed every camera-cadence EVF frame straight into the recorder.
+            let tap = evfClipRecorder.start(to: url)
+            canon.frameTap = tap
         } else {
             camera.startRecording(to: url)
         }
     }
 
     private func stopClip() async -> URL? {
-        usesCanon ? await evfClipRecorder.stop() : await camera.stopRecording()
+        if usesCanon {
+            canon.frameTap = nil
+            return await evfClipRecorder.stop()
+        }
+        return await camera.stopRecording()
     }
 
     private func scheduleAutoAdvance() {
@@ -209,7 +213,7 @@ final class KioskViewModel {
     private func finishSession() async {
         guard let template else { return }
         state = .processing
-        let eventID = event.persistentModelID.hashValue.description
+        let eventID = event.id.uuidString
         let shotsSnapshot = shots
         let clipsSnapshot = clips
         let gifWidth = event.gifWidth

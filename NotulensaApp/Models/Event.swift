@@ -1,51 +1,54 @@
 import Foundation
-import SwiftData
+import Combine
 
-@Model
-final class Event {
-    var name: String
-    var createdAt: Date
+/// One photobooth event. Ventura-compatible: plain ObservableObject persisted as JSON
+/// by PhotoboothStore (SwiftData needs macOS 14; this runs on macOS 13+).
+final class Event: ObservableObject, Identifiable, Codable {
+    let id: UUID
+    @Published var name: String
+    @Published var createdAt: Date
 
     // MARK: Idle & welcome screen
-    /// Relative path to the idle video/photo shown when nothing happens.
-    var idleMediaPath: String?
-    /// Relative path to the welcome screen background photo.
-    var welcomeBackgroundPath: String?
-    /// Welcome screen button positions, relative (0...1) to the screen.
-    var startButtonRelX: Double = 0.5
-    var startButtonRelY: Double = 0.72
-    var galleryButtonRelX: Double = 0.5
-    var galleryButtonRelY: Double = 0.86
+    @Published var idleMediaPath: String?
+    @Published var welcomeBackgroundPath: String?
+    @Published var startButtonRelX: Double
+    @Published var startButtonRelY: Double
+    @Published var galleryButtonRelX: Double
+    @Published var galleryButtonRelY: Double
 
     // MARK: Capture settings
-    /// Camera source: "webcam" (AVFoundation) or "canon" (EDSDK — EOS 600D/RP over USB).
-    var cameraSource: String = "webcam"
-    /// Countdown seconds before the first photo.
-    var countdownFirst: Int = 5
-    /// Countdown seconds before the remaining photos.
-    var countdownOthers: Int = 3
-    /// How long each captured photo is displayed for review before auto-continuing.
-    var reviewSeconds: Int = 5
+    @Published var cameraSource: String
+    @Published var countdownFirst: Int
+    @Published var countdownOthers: Int
+    @Published var reviewSeconds: Int
 
-    // MARK: GIF settings
-    /// Output GIF width in pixels.
-    var gifWidth: Int = 720
-    /// Seconds each photo is shown in the GIF.
-    var gifFrameSeconds: Double = 0.8
+    // MARK: Slideshow settings (kept "gif" names for storage compatibility)
+    @Published var gifWidth: Int
+    @Published var gifFrameSeconds: Double
 
     // MARK: Live photo settings
-    /// How many times the slot clips loop in the live photo video.
-    var livePhotoLoops: Int = 2
+    @Published var livePhotoLoops: Int
 
-    @Relationship(deleteRule: .cascade, inverse: \PhotoTemplate.event)
-    var templates: [PhotoTemplate]
-    @Relationship(deleteRule: .cascade, inverse: \CompositedPhoto.event)
-    var captures: [CompositedPhoto]
+    @Published var templates: [PhotoTemplate]
+    @Published var captures: [CompositedPhoto]
 
     init(name: String) {
+        self.id = UUID()
         self.name = name
         self.createdAt = .now
         self.idleMediaPath = nil
+        self.welcomeBackgroundPath = nil
+        self.startButtonRelX = 0.5
+        self.startButtonRelY = 0.72
+        self.galleryButtonRelX = 0.5
+        self.galleryButtonRelY = 0.86
+        self.cameraSource = "webcam"
+        self.countdownFirst = 5
+        self.countdownOthers = 3
+        self.reviewSeconds = 5
+        self.gifWidth = 720
+        self.gifFrameSeconds = 0.8
+        self.livePhotoLoops = 2
         self.templates = []
         self.captures = []
     }
@@ -56,7 +59,62 @@ final class Event {
         return ["mp4", "mov", "m4v"].contains(ext)
     }
 
+    /// Ready to launch / finish setup: at least one template, and every template has
+    /// at least one photo slot (an empty template would break the capture flow).
     var canStart: Bool {
-        !templates.isEmpty
+        !templates.isEmpty && templates.allSatisfy { $0.shotCount >= 1 }
+    }
+
+    // MARK: Codable
+
+    enum CodingKeys: String, CodingKey {
+        case id, name, createdAt, idleMediaPath, welcomeBackgroundPath
+        case startButtonRelX, startButtonRelY, galleryButtonRelX, galleryButtonRelY
+        case cameraSource, countdownFirst, countdownOthers, reviewSeconds
+        case gifWidth, gifFrameSeconds, livePhotoLoops, templates, captures
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = (try? c.decode(UUID.self, forKey: .id)) ?? UUID()
+        name = try c.decode(String.self, forKey: .name)
+        createdAt = try c.decode(Date.self, forKey: .createdAt)
+        idleMediaPath = try c.decodeIfPresent(String.self, forKey: .idleMediaPath)
+        welcomeBackgroundPath = try c.decodeIfPresent(String.self, forKey: .welcomeBackgroundPath)
+        startButtonRelX = (try? c.decode(Double.self, forKey: .startButtonRelX)) ?? 0.5
+        startButtonRelY = (try? c.decode(Double.self, forKey: .startButtonRelY)) ?? 0.72
+        galleryButtonRelX = (try? c.decode(Double.self, forKey: .galleryButtonRelX)) ?? 0.5
+        galleryButtonRelY = (try? c.decode(Double.self, forKey: .galleryButtonRelY)) ?? 0.86
+        cameraSource = (try? c.decode(String.self, forKey: .cameraSource)) ?? "webcam"
+        countdownFirst = (try? c.decode(Int.self, forKey: .countdownFirst)) ?? 5
+        countdownOthers = (try? c.decode(Int.self, forKey: .countdownOthers)) ?? 3
+        reviewSeconds = (try? c.decode(Int.self, forKey: .reviewSeconds)) ?? 5
+        gifWidth = (try? c.decode(Int.self, forKey: .gifWidth)) ?? 720
+        gifFrameSeconds = (try? c.decode(Double.self, forKey: .gifFrameSeconds)) ?? 0.8
+        livePhotoLoops = (try? c.decode(Int.self, forKey: .livePhotoLoops)) ?? 2
+        templates = (try? c.decode([PhotoTemplate].self, forKey: .templates)) ?? []
+        captures = (try? c.decode([CompositedPhoto].self, forKey: .captures)) ?? []
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(name, forKey: .name)
+        try c.encode(createdAt, forKey: .createdAt)
+        try c.encodeIfPresent(idleMediaPath, forKey: .idleMediaPath)
+        try c.encodeIfPresent(welcomeBackgroundPath, forKey: .welcomeBackgroundPath)
+        try c.encode(startButtonRelX, forKey: .startButtonRelX)
+        try c.encode(startButtonRelY, forKey: .startButtonRelY)
+        try c.encode(galleryButtonRelX, forKey: .galleryButtonRelX)
+        try c.encode(galleryButtonRelY, forKey: .galleryButtonRelY)
+        try c.encode(cameraSource, forKey: .cameraSource)
+        try c.encode(countdownFirst, forKey: .countdownFirst)
+        try c.encode(countdownOthers, forKey: .countdownOthers)
+        try c.encode(reviewSeconds, forKey: .reviewSeconds)
+        try c.encode(gifWidth, forKey: .gifWidth)
+        try c.encode(gifFrameSeconds, forKey: .gifFrameSeconds)
+        try c.encode(livePhotoLoops, forKey: .livePhotoLoops)
+        try c.encode(templates, forKey: .templates)
+        try c.encode(captures, forKey: .captures)
     }
 }

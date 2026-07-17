@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xcodebuild -project NotulensaApp.xcodeproj -scheme NotulensaApp -destination 'platform=macOS' clean build)",
+      "Bash(xcodebuild -project NotulensaApp.xcodeproj -scheme NotulensaApp -destination 'platform=macOS' build)"
+    ]
+  }
+}

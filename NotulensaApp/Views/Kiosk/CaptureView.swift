@@ -3,7 +3,9 @@ import AppKit
 
 /// Live preview + countdown per shot; after each shot: Retake or Next.
 struct CaptureView: View {
-    @Bindable var viewModel: KioskViewModel
+    @ObservedObject var viewModel: KioskViewModel
+    /// Observed so the Canon live-view state (evfReady / errorMessage) refreshes the preview.
+    @ObservedObject private var canon = CanonCameraService.shared
 
     var body: some View {
         // The camera preview stays mounted the whole time capturing is active — swapping it
@@ -45,12 +47,12 @@ struct CaptureView: View {
             if viewModel.usesCanon {
                 // Canon EVF frames go straight into a CALayer — no SwiftUI re-render per frame.
                 Group {
-                    if viewModel.canon.evfReady {
+                    if canon.isConnected && canon.evfReady {
                         CanonEvfPreviewView()
                     } else {
                         VStack(spacing: 16) {
                             ProgressView().controlSize(.large).tint(.white)
-                            Text(viewModel.canon.errorMessage ?? "Connecting to Canon camera…")
+                            Text(canon.errorMessage ?? "Connecting to Canon camera…")
                                 .font(.title3)
                                 .foregroundStyle(.white.opacity(0.8))
                         }
@@ -93,7 +95,7 @@ struct CaptureView: View {
                         .padding(.vertical, 12)
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.extraLarge)
+                .controlSize(.large)
 
                 Button {
                     viewModel.next()
@@ -104,7 +106,7 @@ struct CaptureView: View {
                         .padding(.vertical, 12)
                 }
                 .buttonStyle(.borderedProminent)
-                .controlSize(.extraLarge)
+                .controlSize(.large)
                 .tint(.pink)
             }
             .padding(.bottom, 50)

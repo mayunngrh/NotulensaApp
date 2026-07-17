@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import AppKit
 import Network
 import CryptoKit
@@ -7,9 +8,8 @@ import Security
 /// Google OAuth for a native desktop app: opens the browser, catches the redirect on a
 /// localhost loopback listener (PKCE), and keeps tokens in the Keychain. Same flow the
 /// memoribox Electron app uses, without any SDK.
-@Observable
 @MainActor
-final class GoogleAuthService {
+final class GoogleAuthService: ObservableObject {
     static let shared = GoogleAuthService()
 
     private static let scope = "https://www.googleapis.com/auth/drive.file"
@@ -40,8 +40,8 @@ final class GoogleAuthService {
         set { UserDefaults.standard.set(newValue, forKey: "gdrive.masterFolder") }
     }
 
-    private(set) var isSignedIn: Bool = KeychainStore.load(key: "refreshToken") != nil
-    var statusMessage: String?
+    @Published private(set) var isSignedIn: Bool = KeychainStore.load(key: "refreshToken") != nil
+    @Published var statusMessage: String?
 
     private var accessToken: String?
     private var accessTokenExpiry: Date?

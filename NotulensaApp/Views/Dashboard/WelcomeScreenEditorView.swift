@@ -5,8 +5,7 @@ import UniformTypeIdentifiers
 /// Step 2 of event setup: idle attract media, welcome background, and a drag-to-position
 /// layout editor for the Start / Gallery buttons, with a live preview toggle.
 struct WelcomeScreenEditorView: View {
-    @Bindable var event: Event
-    @Environment(\.modelContext) private var context
+    @ObservedObject var event: Event
 
     private enum ImportTarget: Identifiable {
         case idleMedia, welcomeBackground

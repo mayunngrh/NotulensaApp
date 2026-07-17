@@ -5,7 +5,7 @@ import AVKit
 /// Final session outputs — printable photo, GIF, live photo — with share options.
 /// Auto-returns to idle after a timeout.
 struct ResultView: View {
-    @Bindable var viewModel: KioskViewModel
+    @ObservedObject var viewModel: KioskViewModel
     let result: SessionResult
     let onDone: () -> Void
 
@@ -88,7 +88,7 @@ struct ResultView: View {
         .onTapGesture { restartIdleTimer() }
         .onAppear { restartIdleTimer() }
         .onDisappear { idleTimer?.cancel() }
-        .onChange(of: tab) { setupPlayerIfNeeded() }
+        .onChange(of: tab) { _ in setupPlayerIfNeeded() }
         .task { setupPlayerIfNeeded() }
         .sheet(isPresented: $showQR) {
             qrSheet
@@ -135,7 +135,7 @@ struct ResultView: View {
                 .padding(.vertical, 14)
         }
         .buttonStyle(.borderedProminent)
-        .controlSize(.extraLarge)
+        .controlSize(.large)
         .tint(.pink)
     }
 

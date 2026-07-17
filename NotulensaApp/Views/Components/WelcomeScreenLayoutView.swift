@@ -5,7 +5,7 @@ import AppKit
 /// + Gallery button, positioned by relative (0...1) coordinates stored on the event.
 /// Used both live in the kiosk and, in editable mode, in the event setup wizard.
 struct WelcomeScreenLayoutView: View {
-    @Bindable var event: Event
+    @ObservedObject var event: Event
     var isEditable: Bool = false
     var onStart: (() -> Void)?
     var onGallery: (() -> Void)?
@@ -76,7 +76,7 @@ struct WelcomeScreenLayoutView: View {
                         .padding(.vertical, 14)
                 }
                 .buttonStyle(.borderedProminent)
-                .controlSize(.extraLarge)
+                .controlSize(.large)
                 .tint(tint)
             }
         }

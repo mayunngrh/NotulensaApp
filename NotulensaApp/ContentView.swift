@@ -1,4 +1,5 @@
 //
+import Combine
 //  ContentView.swift
 //  NotulensaApp
 //
@@ -7,15 +8,15 @@
 
 import SwiftUI
 
-@Observable
-final class AppRouter {
+final class AppRouter: ObservableObject {
     /// When set, the app is running an event in kiosk mode.
-    var runningEvent: Event?
+    @Published var runningEvent: Event?
 }
 
 struct ContentView: View {
-    @State private var router = AppRouter()
-    @State private var canon = CanonCameraService.shared
+    @StateObject private var router = AppRouter()
+    @StateObject private var store = PhotoboothStore.shared
+    @ObservedObject private var canon = CanonCameraService.shared
 
     var body: some View {
         Group {
@@ -25,7 +26,8 @@ struct ContentView: View {
                 DashboardView()
             }
         }
-        .environment(router)
+        .environmentObject(router)
+        .environmentObject(store)
         .task {
             canon.startMonitoring()
         }
@@ -43,8 +45,4 @@ struct ContentView: View {
         }
         .animation(.spring(duration: 0.4), value: canon.toast)
     }
-}
-
-#Preview {
-    ContentView()
 }

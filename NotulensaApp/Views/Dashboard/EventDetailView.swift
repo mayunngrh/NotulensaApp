@@ -1,14 +1,14 @@
 import SwiftUI
-import SwiftData
 import AppKit
 import UniformTypeIdentifiers
 
 /// Event setup hub. Each numbered section is one step of getting an event kiosk-ready:
 /// 1) name (set on creation), 2) welcome screen, 3) templates, 4) capture settings.
 struct EventDetailView: View {
-    @Bindable var event: Event
-    @Environment(\.modelContext) private var context
-    @Environment(AppRouter.self) private var router
+    @ObservedObject var event: Event
+    @EnvironmentObject private var store: PhotoboothStore
+    /// When provided, shows a Done button that is disabled until the event is valid.
+    var onDone: (() -> Void)? = nil
 
     private enum ImportTarget: Identifiable {
         case frame
@@ -53,10 +53,10 @@ struct EventDetailView: View {
                 }
                 .onDelete { offsets in
                     for index in offsets {
-                        let template = event.templates[index]
-                        MediaStore.delete(relativePath: template.frameImagePath)
-                        context.delete(template)
+                        MediaStore.delete(relativePath: event.templates[index].frameImagePath)
                     }
+                    event.templates.remove(atOffsets: offsets)
+                    store.save()
                 }
                 if event.templates.count < maxTemplates {
                     Button {
@@ -83,14 +83,30 @@ struct EventDetailView: View {
 
             if !event.canStart {
                 Section {
-                    Text("Add at least one template — then launch from the dashboard.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Label(
+                        event.templates.isEmpty
+                            ? "Add at least one template to finish setup."
+                            : "Every template needs at least one photo slot.",
+                        systemImage: "exclamationmark.triangle.fill"
+                    )
+                    .font(.caption)
+                    .foregroundStyle(.orange)
                 }
             }
         }
         .formStyle(.grouped)
         .navigationTitle(event.name)
+        .toolbar {
+            if let onDone {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        store.save()
+                        onDone()
+                    }
+                    .disabled(!event.canStart)
+                }
+            }
+        }
         .navigationDestination(for: PhotoTemplate.self) { template in
             TemplateEditorView(template: template)
         }
@@ -103,8 +119,17 @@ struct EventDetailView: View {
                     name: "Template \(event.templates.count + 1)",
                     frameImagePath: path
                 )
-                template.event = event
-                context.insert(template)
+                // Every template needs at least one photo slot — start with one centered.
+                template.slots.append(PhotoSlot(
+                    order: 1,
+                    x: template.canvasWidth * 0.15,
+                    y: template.canvasHeight * 0.15,
+                    width: template.canvasWidth * 0.7,
+                    height: template.canvasHeight * 0.7,
+                    layer: 0
+                ))
+                event.templates.append(template)
+                store.save()
             }
         }
         .alert("Import failed", isPresented: .constant(importError != nil)) {

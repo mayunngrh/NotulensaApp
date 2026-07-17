@@ -2,8 +2,8 @@ import SwiftUI
 
 /// Step 4 of event setup: countdown timing, review duration, GIF, and live photo settings.
 struct CaptureSettingsView: View {
-    @Bindable var event: Event
-    @State private var canon = CanonCameraService.shared
+    @ObservedObject var event: Event
+    @ObservedObject private var canon = CanonCameraService.shared
 
     var body: some View {
         Form {

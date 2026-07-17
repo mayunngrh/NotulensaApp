@@ -1,4 +1,5 @@
 import Foundation
+import Combine
 import AppKit
 import CoreGraphics
 
@@ -12,25 +13,27 @@ import CoreGraphics
 /// Ported behaviors from memoribox's battle-tested edsdkManager:
 /// - SaveTo negotiation Both → Host → Camera (600D only accepts card-save)
 /// - photo retrieval via DirItemRequestTransfer (RP) or card-scan fallback (600D)
-@Observable
 @MainActor
-final class CanonCameraService {
+final class CanonCameraService: ObservableObject {
     static let shared = CanonCameraService()
 
     // MARK: Published state (main actor)
 
     /// Latest live-view frame (read by the clip recorder).
-    private(set) var evfImage: CGImage?
+    @Published private(set) var evfImage: CGImage?
     /// True once frames are flowing — the UI's "show preview vs spinner" flag.
-    private(set) var evfReady = false
+    @Published private(set) var evfReady = false
     /// Direct per-frame sink for the preview layer (bypasses SwiftUI re-rendering).
     var evfFrameSink: ((CGImage) -> Void)?
-    private(set) var isConnected = false
+    /// Per-frame tap invoked on the SDK thread (used by the clip recorder so encoding
+    /// consumes real frames at the camera's cadence, never touching the main thread).
+    nonisolated(unsafe) var frameTap: ((CGImage) -> Void)?
+    @Published private(set) var isConnected = false
     /// Human-readable model name (e.g. "Canon EOS RP") once connected.
-    private(set) var cameraName: String?
+    @Published private(set) var cameraName: String?
     /// Transient connect/disconnect message for the UI toast; auto-clears.
-    private(set) var toast: String?
-    var errorMessage: String?
+    @Published private(set) var toast: String?
+    @Published var errorMessage: String?
 
     private var toastTask: Task<Void, Never>?
 
@@ -309,12 +312,16 @@ final class CanonCameraService {
         EdsGetLength(stream, &length)
         guard let pointer, length > 0 else { return }
 
-        // Decode here on the SDK thread — the main thread only receives the finished
-        // CGImage and hands it to the preview layer / clip recorder.
+        // Decode here on the SDK thread. ShouldCacheImmediately forces the JPEG
+        // decompression to happen NOW (on this thread) instead of lazily at first draw
+        // (which would land back on the main thread and stutter the preview).
         let data = Data(bytes: pointer, count: Int(length))
-        let options = [kCGImageSourceShouldCache: false] as CFDictionary
+        let options = [kCGImageSourceShouldCacheImmediately: true] as CFDictionary
         guard let source = CGImageSourceCreateWithData(data as CFData, options),
               let image = CGImageSourceCreateImageAtIndex(source, 0, options) else { return }
+
+        // Clip recorder consumes frames right here at camera cadence (its own queue).
+        frameTap?(image)
 
         DispatchQueue.main.async {
             let service = CanonCameraService.shared
