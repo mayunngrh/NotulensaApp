@@ -26,10 +26,20 @@ enum LivePhotoExporter {
     /// even if individual frames are rendered cleanly.
     static let fps: Int32 = 30
 
-    static func export(template: TemplateSnapshot, clipsByOrder: [Int: URL], loops: Int, eventID: String) async throws -> String {
+    /// `expectedDuration` is the countdown length every clip was *supposed* to record
+    /// (in seconds) — passed in rather than measured per-clip. Real recordings vary by
+    /// a few milliseconds due to task-scheduling jitter, so deriving frame count from
+    /// each clip's actual duration (or worse, the shortest one) made every shot's output
+    /// length slightly different and truncated longer clips. Using one shared constant
+    /// makes every slot's frame count and duration identical, down to the frame — any
+    /// clip that runs a hair short just holds its last frame (already handled below)
+    /// instead of the whole export being clipped to the shortest recording.
+    static func export(template: TemplateSnapshot, clipsByOrder: [Int: URL], loops: Int, eventID: String, expectedDuration: Double) async throws -> String {
+        guard !clipsByOrder.isEmpty, expectedDuration > 0 else {
+            throw ExportError.noClips
+        }
         let assets = clipsByOrder.mapValues { AVURLAsset(url: $0) }
         var generators: [Int: AVAssetImageGenerator] = [:]
-        var durations: [Int: Double] = [:]
         for (order, asset) in assets {
             let gen = AVAssetImageGenerator(asset: asset)
             gen.appliesPreferredTrackTransform = true
@@ -39,13 +49,10 @@ enum LivePhotoExporter {
             gen.requestedTimeToleranceBefore = tolerance
             gen.requestedTimeToleranceAfter = tolerance
             generators[order] = gen
-            durations[order] = try await asset.load(.duration).seconds
         }
-        guard let clipDuration = durations.values.min(), clipDuration > 0 else {
-            throw ExportError.noClips
-        }
-        // Always extract at 30fps for consistent output timing
-        let frameCount = max(1, Int(clipDuration * Double(fps)))
+        // Always extract at 30fps for consistent output timing, for exactly the countdown
+        // length — identical for every slot regardless of each clip's actual recorded length.
+        let frameCount = max(1, Int(expectedDuration * Double(fps)))
 
         let scale = min(1.0, 1080.0 / max(template.canvasWidth, template.canvasHeight))
         let outW = Int(template.canvasWidth * scale)

@@ -25,7 +25,12 @@ final class EvfClipRecorder: @unchecked Sendable {
     private var pixelBufferPool: CVPixelBufferPool?
     private var frameQueue: [(CGImage, CMTime)] = []
     private var frameCount = 0
-    private var startTime: CFTimeInterval = 0
+    /// Set lazily on the *first* frame that actually arrives, not when recording is
+    /// requested. The camera can take 100–300ms to deliver its first EVF frame after
+    /// waking, so stamping start time up front left a gap with no video data at time
+    /// zero — players render that gap as a black flash before the first real frame.
+    /// Using the first frame's arrival as t=0 guarantees a real frame is always there.
+    private var startTime: CFTimeInterval?
     private var outputURL: URL?
     private var encodingTask: Task<Void, Never>?
 
@@ -75,21 +80,26 @@ final class EvfClipRecorder: @unchecked Sendable {
             self.outputURL = url
             self.frameCount = 0
             self.frameQueue = []
-            self.startTime = CACurrentMediaTime()
+            self.startTime = nil
             self.startEncodingLoop()
         }
         return { [weak self] image in
             // Stamp the real arrival time right here on the SDK thread, at the moment
             // the frame actually arrived — not later when the queue happens to drain it.
-            let elapsed = CACurrentMediaTime() - (self?.startTime ?? 0)
-            self?.enqueueFrame(image, at: elapsed)
+            let now = CACurrentMediaTime()
+            self?.enqueueFrame(image, arrivedAt: now)
         }
     }
 
     /// Queue frame for encoding (called from SDK thread, doesn't block).
-    private func enqueueFrame(_ image: CGImage, at elapsed: CFTimeInterval) {
+    /// The first frame to arrive defines t=0 (set on the serial queue to stay race-free)
+    /// — this guarantees the video always has real content starting at time zero, with
+    /// no black gap while waiting for the camera to deliver its first frame.
+    private func enqueueFrame(_ image: CGImage, arrivedAt now: CFTimeInterval) {
         queue.async { [weak self] in
             guard let self else { return }
+            if self.startTime == nil { self.startTime = now }
+            let elapsed = max(0, now - self.startTime!)
             let time = CMTime(seconds: elapsed, preferredTimescale: 600)
             self.frameQueue.append((image, time))
             self.frameCount += 1

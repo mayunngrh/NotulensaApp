@@ -103,7 +103,7 @@ struct KioskView: View {
                 Color.clear
                     .frame(width: 80, height: 80)
                     .contentShape(Rectangle())
-                    .onTapGesture(count: 2, perform: exitKiosk)
+                    .onTapGesture(count: 2) { exitKiosk() }
             }
         case .gallery:
             GalleryView(event: event) {
@@ -117,7 +117,9 @@ struct KioskView: View {
             } onSelectWebcam: {
                 vm.selectCamera(.webcam)
             } onCancel: {
-                exitKiosk()
+                // Leave the kiosk but keep the window fullscreen — the user asked that
+                // cancelling the camera picker not drop out of fullscreen.
+                exitKiosk(keepFullscreen: true)
             }
         case .pickTemplate:
             TemplatePickerView(event: event) { template in
@@ -138,8 +140,7 @@ struct KioskView: View {
     }
 
     private func persistResult(_ vm: KioskViewModel) {
-        // Preview mode doesn't save results to the event gallery — it's just a test flow.
-        guard !vm.isInPreviewMode, let relPath = vm.pendingResultPath else { return }
+        guard let relPath = vm.pendingResultPath else { return }
         vm.pendingResultPath = nil
         let photo = CompositedPhoto(filePath: relPath, livePhotoPath: vm.pendingLivePhotoPath, slideshowPath: vm.pendingSlideshowPath)
         photo.rawPhotoPaths = vm.pendingRawPaths
@@ -151,9 +152,11 @@ struct KioskView: View {
         store.save()
     }
 
-    private func exitKiosk() {
+    private func exitKiosk(keepFullscreen: Bool = false) {
         viewModel.backToIdle()
-        setFullscreen(false)
+        if !keepFullscreen {
+            setFullscreen(false)
+        }
         router.runningEvent = nil
     }
 

@@ -14,10 +14,8 @@ struct WelcomeView: View {
 
     var body: some View {
         if event.enablePreview {
-            // Preview mode: show landscape camera feed instead of welcome background
             previewModeWelcome
         } else {
-            // Normal mode: show welcome background with buttons
             normalWelcome
         }
     }
@@ -89,20 +87,15 @@ struct WelcomeView: View {
                     Spacer()
 
                     // Landscape camera preview (16:9 aspect ratio, centered).
-                    // "fit" gravity ensures the wide source is never cropped/zoomed.
                     ZStack {
-                        if viewModel.usesCanon {
-                            if viewModel.canon.isConnected && viewModel.canon.evfReady {
-                                CanonEvfPreviewView(contentsGravity: .resizeAspect)
-                            } else {
-                                previewPlaceholder(viewModel.canon.errorMessage ?? "Connecting to Canon camera…")
-                            }
-                        } else if viewModel.usesSony {
-                            if viewModel.sony.isConnected && viewModel.sony.evfReady {
-                                SonyEvfPreviewView(contentsGravity: .resizeAspect)
-                            } else {
-                                previewPlaceholder(viewModel.sony.errorMessage ?? "Connecting to Sony camera…")
-                            }
+                        if viewModel.canon.isConnected && viewModel.canon.evfReady {
+                            CanonEvfPreviewView(contentsGravity: .resizeAspect)
+                        } else if viewModel.sony.isConnected && viewModel.sony.evfReady {
+                            SonyEvfPreviewView(contentsGravity: .resizeAspect)
+                        } else if viewModel.canon.isConnected {
+                            previewPlaceholder(viewModel.canon.errorMessage ?? "Connecting to Canon camera…")
+                        } else if viewModel.sony.isConnected {
+                            previewPlaceholder(viewModel.sony.errorMessage ?? "Connecting to Sony camera…")
                         } else {
                             CameraPreviewView(session: viewModel.camera.session, videoGravity: .resizeAspect)
                         }
@@ -117,21 +110,31 @@ struct WelcomeView: View {
 
                 Spacer()
 
-                // Preview button in the center — same pink tint + camera icon as the
-                // normal (non-preview) "Start Photo Session" button, for visual parity.
-                Button(action: onPreview) {
-                    Label("Take Photo", systemImage: "camera.fill")
-                        .font(.title2.bold())
-                        .padding(.horizontal, 40)
-                        .padding(.vertical, 16)
+                // Buttons centered: Take Photo + Gallery
+                HStack(spacing: 30) {
+                    Button(action: onGallery) {
+                        Label("Gallery", systemImage: "photo.stack.fill")
+                            .font(.title2.bold())
+                            .padding(.horizontal, 30)
+                            .padding(.vertical, 16)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .tint(.indigo)
+
+                    Button(action: onPreview) {
+                        Label("Take Photo", systemImage: "camera.fill")
+                            .font(.title2.bold())
+                            .padding(.horizontal, 30)
+                            .padding(.vertical, 16)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .tint(.pink)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .tint(.pink)
 
                 Spacer()
 
-                // Bottom info
                 VStack(spacing: 8) {
                     Text("Preview Mode Enabled")
                         .font(.headline)

@@ -14,21 +14,17 @@ final class GoogleAuthService: ObservableObject {
 
     private static let scope = "https://www.googleapis.com/auth/drive.file"
 
-    /// Settings-screen override first, then the credentials baked in at build time
-    /// (Secrets.swift), so a distributed .app works with no setup.
+    /// Always the credentials baked in at build time (Secrets.swift). A stale
+    /// UserDefaults override once pointed these at a wrong Google Cloud project and
+    /// silently won over Secrets.swift, causing "Drive API not enabled" 403s that no
+    /// code change could fix — so the override was removed entirely.
     var clientID: String {
-        get {
-            let stored = UserDefaults.standard.string(forKey: "gdrive.clientID") ?? ""
-            return stored.isEmpty ? Secrets.gdriveClientID : stored
-        }
-        set { UserDefaults.standard.set(newValue, forKey: "gdrive.clientID") }
+        get { Secrets.gdriveClientID }
+        set { /* ignored — credentials come from Secrets.swift only */ }
     }
     var clientSecret: String {
-        get {
-            let stored = UserDefaults.standard.string(forKey: "gdrive.clientSecret") ?? ""
-            return stored.isEmpty ? Secrets.gdriveClientSecret : stored
-        }
-        set { UserDefaults.standard.set(newValue, forKey: "gdrive.clientSecret") }
+        get { Secrets.gdriveClientSecret }
+        set { /* ignored — credentials come from Secrets.swift only */ }
     }
 
     /// Top-level Drive folder every event/session lives under.

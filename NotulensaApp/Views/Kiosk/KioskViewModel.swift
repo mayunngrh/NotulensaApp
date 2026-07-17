@@ -105,6 +105,21 @@ final class KioskViewModel: ObservableObject {
     init(event: Event) {
         self.event = event
         observeCameraDisconnects()
+        observeGoogleSignIn()
+    }
+
+    /// If the user signs in to Google Drive *after* the session already started (the
+    /// upfront prepareDriveFolder() call at startEvent() ran while signed out), create
+    /// the session folder as soon as sign-in completes instead of waiting for the first
+    /// upload attempt — this is what makes the QR code become valid right away.
+    private func observeGoogleSignIn() {
+        GoogleAuthService.shared.$isSignedIn
+            .dropFirst()
+            .sink { [weak self] signedIn in
+                guard let self, signedIn, self.driveFolderTask == nil else { return }
+                self.prepareDriveFolder()
+            }
+            .store(in: &cameraMonitors)
     }
 
     /// Watches whichever camera ends up locked in; if it disconnects mid-countdown,
@@ -468,7 +483,13 @@ final class KioskViewModel: ObservableObject {
                     .init(order: $0.order, x: $0.x, y: $0.y, width: $0.width, height: $0.height, rotation: $0.rotation, layer: $0.layer)
                 }
             )
-            livePhotoPath = try? await LivePhotoExporter.export(template: snapshot, clipsByOrder: clipsSnapshot, loops: liveLoops, eventID: eventID)
+            livePhotoPath = try? await LivePhotoExporter.export(
+                template: snapshot,
+                clipsByOrder: clipsSnapshot,
+                loops: liveLoops,
+                eventID: eventID,
+                expectedDuration: Double(event.countdown)
+            )
         }
 
         for clip in clipsSnapshot.values { try? FileManager.default.removeItem(at: clip) }
@@ -486,16 +507,15 @@ final class KioskViewModel: ObservableObject {
         pendingLivePhotoPath = livePhotoPath
         pendingSlideshowPath = slideshowPath
         pendingRawPaths = rawPaths
-        pendingDriveURL = nil
+        pendingDriveURL = driveLink?.absoluteString
         state = .result(SessionResult(
             printableURL: MediaStore.url(for: printablePath),
             slideshowURL: slideshowPath.map { MediaStore.url(for: $0) },
             livePhotoURL: livePhotoPath.map { MediaStore.url(for: $0) }
         ))
-        // Preview mode skips Drive upload — it's just a test flow, results don't need saving.
-        if !isInPreviewMode {
-            startUpload(printablePath: printablePath, livePhotoPath: livePhotoPath, slideshowPath: slideshowPath, rawPaths: rawPaths)
-        }
+        // Save results to gallery and upload to Google Drive — same as a normal session,
+        // preview mode is no longer treated as a throwaway test flow.
+        startUpload(printablePath: printablePath, livePhotoPath: livePhotoPath, slideshowPath: slideshowPath, rawPaths: rawPaths)
     }
 
     // MARK: Drive upload — folder created at session start (QR valid immediately),
@@ -555,8 +575,22 @@ final class KioskViewModel: ObservableObject {
     private func startUpload(printablePath: String, livePhotoPath: String?, slideshowPath: String?, rawPaths: [String]) {
         lastUploadArgs = (printablePath, livePhotoPath, slideshowPath, rawPaths)
         let auth = GoogleAuthService.shared
-        guard auth.isSignedIn, let folderTask = driveFolderTask else {
-            NSLog("[Drive] startUpload: not signed in or no folder task")
+        guard auth.isSignedIn else {
+            NSLog("[Drive] startUpload: not signed in")
+            uploadState = .notSignedIn
+            return
+        }
+        // The folder is normally prepped upfront (prepareDriveFolder() at session start),
+        // but that call is skipped if the user wasn't signed in yet at that moment — e.g.
+        // they open Google Drive settings and sign in mid-session. Without this, the
+        // upload would silently no-op forever because driveFolderTask stayed nil. Create
+        // it lazily here so signing in at any point during the session still uploads.
+        if driveFolderTask == nil {
+            NSLog("[Drive] startUpload: no folder task yet, creating it now")
+            prepareDriveFolder()
+        }
+        guard let folderTask = driveFolderTask else {
+            NSLog("[Drive] startUpload: still no folder task after retry")
             uploadState = .notSignedIn
             return
         }

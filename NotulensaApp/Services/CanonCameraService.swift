@@ -41,19 +41,16 @@ final class CanonCameraService: ObservableObject {
     func attachEvfSink(owner: AnyObject, _ sink: @escaping (CGImage) -> Void) {
         evfSinkOwner = owner
         evfFrameSink = sink
-        NSLog("[Canon SDK] EVF sink attached to \(ObjectIdentifier(owner))")
     }
 
     /// Releases the frame sink, but only if `owner` is still the current owner.
     /// Call from dismantleNSView.
     func detachEvfSink(owner: AnyObject) {
         guard evfSinkOwner === owner else {
-            NSLog("[Canon SDK] EVF sink detach ignored — \(ObjectIdentifier(owner)) is not the current owner")
             return
         }
         evfFrameSink = nil
         evfSinkOwner = nil
-        NSLog("[Canon SDK] EVF sink detached from \(ObjectIdentifier(owner))")
     }
     /// Per-frame tap invoked on the SDK thread (used by the clip recorder so encoding
     /// consumes real frames at the camera's cadence, never touching the main thread).
@@ -143,7 +140,6 @@ final class CanonCameraService: ObservableObject {
     func setEvfEnabled(_ enabled: Bool) {
         sdkQueue.async { [self] in
             evfActive = enabled
-            NSLog("[Canon SDK] setEvfEnabled(\(enabled)) — connected=\(connectedFlag)")
             if connectedFlag {
                 enabled ? sdkStartEvf() : sdkStopEvf()
             }
@@ -194,7 +190,6 @@ final class CanonCameraService: ObservableObject {
         var listRef: EdsCameraListRef?
         let listResult = EdsGetCameraList(&listRef)
         guard listResult == EDS_ERR_OK, let list = listRef else {
-            NSLog("[Canon SDK] EdsGetCameraList failed: 0x%X", listResult)
             return
         }
         defer { EdsRelease(list) }
@@ -206,11 +201,9 @@ final class CanonCameraService: ObservableObject {
             // stays quiet rather than flooding the console like a real error would.
             return
         }
-        NSLog("[Canon SDK] Detected %d camera(s), attempting to open session…", count)
 
         var cameraRef: EdsCameraRef?
         guard EdsGetChildAtIndex(list, 0, &cameraRef) == EDS_ERR_OK, let cam = cameraRef else {
-            NSLog("[Canon SDK] EdsGetChildAtIndex failed")
             return
         }
 
@@ -222,7 +215,6 @@ final class CanonCameraService: ObservableObject {
 
         let openResult = EdsOpenSession(cam)
         guard openResult == EDS_ERR_OK else {
-            NSLog("[Canon SDK] EdsOpenSession failed for \(name.isEmpty ? "camera" : name): 0x%X", openResult)
             EdsRelease(cam)
             Task { @MainActor in
                 self.errorMessage = String(format: "Could not open a session with the Canon camera (error 0x%X). Try unplugging and reconnecting it.", openResult)
@@ -270,7 +262,6 @@ final class CanonCameraService: ObservableObject {
         }
 
         connectedFlag = true
-        NSLog("[Canon SDK] Connected: \(displayName), evfActive=\(evfActive)")
         if evfActive {
             sdkStartEvf()
         }
@@ -294,7 +285,6 @@ final class CanonCameraService: ObservableObject {
     }
 
     private nonisolated func sdkHandleDisconnect() {
-        NSLog("[Canon SDK] Handling disconnect (was connected: \(connectedFlag))")
         keepAliveLoop?.cancel()
         keepAliveLoop = nil
         sdkStopEvf()
@@ -330,7 +320,6 @@ final class CanonCameraService: ObservableObject {
 
     private nonisolated func sdkStartEvf() {
         guard let camera else {
-            NSLog("[Canon SDK] sdkStartEvf called with no camera session — skipping")
             return
         }
         var mode: EdsUInt32 = 1
@@ -338,15 +327,12 @@ final class CanonCameraService: ObservableObject {
         var device: EdsUInt32 = Self.evfOutputPC
         let deviceResult = EdsSetPropertyData(camera, Self.propEvfOutputDevice, 0, EdsUInt32(MemoryLayout<EdsUInt32>.size), &device)
         if modeResult != EDS_ERR_OK || deviceResult != EDS_ERR_OK {
-            NSLog("[Canon SDK] sdkStartEvf: propEvfMode=0x%X propEvfOutputDevice=0x%X", modeResult, deviceResult)
         }
         if evfStream == nil {
             var streamRef: EdsStreamRef?
             if EdsCreateMemoryStream(Self.evfBufferSize, &streamRef) == EDS_ERR_OK {
                 evfStream = streamRef
-                NSLog("[Canon SDK] EVF stream created, live view starting")
             } else {
-                NSLog("[Canon SDK] EdsCreateMemoryStream failed for EVF buffer")
             }
         }
     }
@@ -404,7 +390,6 @@ final class CanonCameraService: ObservableObject {
             // would re-render every view observing the service on every single frame.
             if !service.evfReady {
                 service.evfReady = true
-                NSLog("[Canon SDK] First EVF frame decoded — live view is now ready")
             }
             service.evfFrameSink?(image)
         }
@@ -418,40 +403,32 @@ final class CanonCameraService: ObservableObject {
     /// against a snapshot taken just before the shutter.
     func capturePhoto() async throws -> Data {
         guard isConnected else {
-            NSLog("[Canon SDK] capturePhoto() called while not connected")
             throw CanonError.notConnected
         }
-        NSLog("[Canon SDK] capturePhoto() requested")
         return try await withCheckedThrowingContinuation { continuation in
             sdkQueue.async { [self] in
                 guard connectedFlag, let camera else {
-                    NSLog("[Canon SDK] capturePhoto: no active session on sdkQueue")
                     continuation.resume(throwing: CanonError.notConnected)
                     return
                 }
                 preShotFilenames = sdkSnapshotCardFilenames()
-                NSLog("[Canon SDK] Sending shutter command (card snapshot: \(preShotFilenames.count) files)")
 
                 let result = EdsSendCommand(camera, Self.cmdTakePicture, 0)
                 guard result == EDS_ERR_OK else {
-                    NSLog("[Canon SDK] Shutter command failed: 0x%X", result)
                     continuation.resume(throwing: CanonError.shutterFailed(result))
                     return
                 }
-                NSLog("[Canon SDK] Shutter fired, waiting for the object event / card scan")
                 photoContinuation = continuation
 
                 // 600D safety net: if no object event ever arrives, scan the card anyway.
                 sdkQueue.asyncAfter(deadline: .now() + 6) { [weak self] in
                     guard let self, self.photoContinuation != nil else { return }
-                    NSLog("[Canon SDK] No object event after 6s — falling back to card scan")
                     self.sdkScanCardForNewPhoto(attempt: 0)
                 }
                 // Hard timeout: slow SD cards can take a while.
                 sdkQueue.asyncAfter(deadline: .now() + 30) { [weak self] in
                     guard let self else { return }
                     if self.photoContinuation != nil {
-                        NSLog("[Canon SDK] Transfer timed out after 30s")
                     }
                     self.sdkFinishCapture(.failure(CanonError.transferTimeout))
                 }
@@ -462,10 +439,6 @@ final class CanonCameraService: ObservableObject {
     private nonisolated func sdkFinishCapture(_ result: Result<Data, Error>) {
         guard let continuation = photoContinuation else { return }
         photoContinuation = nil
-        switch result {
-        case .success(let data): NSLog("[Canon SDK] Capture finished: \(data.count) bytes")
-        case .failure(let error): NSLog("[Canon SDK] Capture failed: \(error.localizedDescription)")
-        }
         continuation.resume(with: result)
     }
 
@@ -473,21 +446,17 @@ final class CanonCameraService: ObservableObject {
         switch event {
         case Self.eventDirItemRequestTransfer:
             // Newer bodies (EOS RP): direct pull of the offered file.
-            NSLog("[Canon SDK] eventDirItemRequestTransfer received — pulling file directly")
             guard let ref else {
-                NSLog("[Canon SDK] eventDirItemRequestTransfer had no ref")
                 return
             }
             if let data = sdkDownloadDirectoryItem(ref) {
                 sdkFinishCapture(.success(data))
             } else {
-                NSLog("[Canon SDK] sdkDownloadDirectoryItem returned nil for direct transfer")
             }
             EdsRelease(ref)
         case Self.eventDirItemCreated:
             // 600D: this ref is just a notification handle, not downloadable (err 0x61).
             // Give the camera time to finish writing, then scan the card.
-            NSLog("[Canon SDK] eventDirItemCreated received — scheduling card scan in 2.5s")
             if let ref { EdsRelease(ref) }
             sdkQueue.asyncAfter(deadline: .now() + 2.5) { [weak self] in
                 self?.sdkScanCardForNewPhoto(attempt: 0)
@@ -505,19 +474,16 @@ final class CanonCameraService: ObservableObject {
             let data = sdkDownloadDirectoryItem(item)
             EdsRelease(item)
             if let data {
-                NSLog("[Canon SDK] Card scan found new photo on attempt \(attempt)")
                 sdkFinishCapture(.success(data))
                 return
             }
         }
         // The 600D can take a couple of seconds to finish writing to a slow card.
         if attempt < 6 {
-            NSLog("[Canon SDK] Card scan attempt \(attempt): no new photo yet, retrying")
             sdkQueue.asyncAfter(deadline: .now() + 1.5) { [weak self] in
                 self?.sdkScanCardForNewPhoto(attempt: attempt + 1)
             }
         } else {
-            NSLog("[Canon SDK] Card scan exhausted all attempts — photo not found")
             sdkFinishCapture(.failure(CanonError.photoNotFoundOnCard))
         }
     }
