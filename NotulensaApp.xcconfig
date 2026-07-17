@@ -1,0 +1,9 @@
+// Sony SDK configuration
+HEADER_SEARCH_PATHS = $(SRCROOT)/Vendor/CrSDK/include
+LIBRARY_SEARCH_PATHS = $(SRCROOT)/Vendor/CrSDK/lib
+
+// Bridging header
+SWIFT_OBJC_BRIDGING_HEADER = NotulensaApp-Bridging-Header.h
+
+// Link against Sony SDK libraries
+OTHER_LDFLAGS = -lCr_Core -lmonitor_protocol -lmonitor_protocol_pf -lCr_PTP_IP -lCr_PTP_USB -lusb-1.0.0 -lssh2

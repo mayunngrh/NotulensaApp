@@ -20,26 +20,41 @@ struct KioskView: View {
         }
         .preferredColorScheme(.dark)
         .task {
-            // Start both paths: Canon EVF streams only while a body is connected,
+            // Start all paths: Canon and Sony EVF streams only while connected,
             // and the webcam stays warm as the automatic fallback.
             viewModel.canon.setEvfEnabled(true)
+            viewModel.sony.setEvfEnabled(true)
             await viewModel.camera.start()
-            // If Canon is already connected, turn off the webcam immediately.
-            if viewModel.canon.isConnected {
+            // If Canon or Sony is already connected, turn off the webcam immediately.
+            if viewModel.canon.isConnected || viewModel.sony.isConnected {
                 viewModel.camera.stop()
             }
             setFullscreen(true)
         }
         .onDisappear {
             viewModel.canon.setEvfEnabled(false)
+            viewModel.sony.setEvfEnabled(false)
             viewModel.camera.stop()
         }
         .onChange(of: viewModel.canon.isConnected) { _ in
             // Once a camera is locked in for this kiosk launch, leave it alone — don't
             // let the *other* camera connecting/disconnecting touch its running session.
-            guard viewModel.lockedUsesCanon == nil else { return }
+            guard viewModel.lockedCamera == nil else { return }
             if viewModel.canon.isConnected {
                 viewModel.camera.stop()
+                viewModel.sony.setEvfEnabled(false)
+            } else {
+                Task {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    await viewModel.camera.start()
+                }
+            }
+        }
+        .onChange(of: viewModel.sony.isConnected) { _ in
+            guard viewModel.lockedCamera == nil else { return }
+            if viewModel.sony.isConnected {
+                viewModel.camera.stop()
+                viewModel.canon.setEvfEnabled(false)
             } else {
                 Task {
                     try? await Task.sleep(for: .milliseconds(500))
@@ -90,9 +105,11 @@ struct KioskView: View {
             }
         case .pickCamera:
             CameraPickerView(viewModel: vm) {
-                vm.selectCamera(true)
+                vm.selectCamera(.canon)
+            } onSelectSony: {
+                vm.selectCamera(.sony)
             } onSelectWebcam: {
-                vm.selectCamera(false)
+                vm.selectCamera(.webcam)
             } onCancel: {
                 vm.backToWelcome()
             }

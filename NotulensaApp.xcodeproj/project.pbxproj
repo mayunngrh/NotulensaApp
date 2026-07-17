@@ -9,6 +9,13 @@
 /* Begin PBXBuildFile section */
 		ED0000000000000000000101 /* EDSDK.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = ED0000000000000000000001 /* EDSDK.framework */; };
 		ED0000000000000000000102 /* EDSDK.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = ED0000000000000000000001 /* EDSDK.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		ED0000000000000000000302 /* libCr_Core.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = ED0000000000000000000301 /* libCr_Core.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		ED0000000000000000000304 /* libmonitor_protocol.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = ED0000000000000000000303 /* libmonitor_protocol.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		ED0000000000000000000306 /* libmonitor_protocol_pf.dylib in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = ED0000000000000000000305 /* libmonitor_protocol_pf.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		ED0000000000000000000401 /* libCr_PTP_IP.dylib in Embed CrAdapter */ = {isa = PBXBuildFile; fileRef = ED0000000000000000000307 /* libCr_PTP_IP.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		ED0000000000000000000402 /* libCr_PTP_USB.dylib in Embed CrAdapter */ = {isa = PBXBuildFile; fileRef = ED0000000000000000000309 /* libCr_PTP_USB.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		ED0000000000000000000403 /* libusb-1.0.0.dylib in Embed CrAdapter */ = {isa = PBXBuildFile; fileRef = ED000000000000000000030B /* libusb-1.0.0.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
+		ED0000000000000000000404 /* libssh2.dylib in Embed CrAdapter */ = {isa = PBXBuildFile; fileRef = ED000000000000000000030D /* libssh2.dylib */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -19,8 +26,25 @@
 			dstSubfolderSpec = 10;
 			files = (
 				ED0000000000000000000102 /* EDSDK.framework in Embed Frameworks */,
+				ED0000000000000000000302 /* libCr_Core.dylib in Embed Frameworks */,
+				ED0000000000000000000304 /* libmonitor_protocol.dylib in Embed Frameworks */,
+				ED0000000000000000000306 /* libmonitor_protocol_pf.dylib in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		ED0000000000000000000400 /* Embed CrAdapter */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = CrAdapter;
+			dstSubfolderSpec = 10;
+			files = (
+				ED0000000000000000000401 /* libCr_PTP_IP.dylib in Embed CrAdapter */,
+				ED0000000000000000000402 /* libCr_PTP_USB.dylib in Embed CrAdapter */,
+				ED0000000000000000000403 /* libusb-1.0.0.dylib in Embed CrAdapter */,
+				ED0000000000000000000404 /* libssh2.dylib in Embed CrAdapter */,
+			);
+			name = "Embed CrAdapter";
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 /* End PBXCopyFilesBuildPhase section */
@@ -28,6 +52,13 @@
 /* Begin PBXFileReference section */
 		8B779BAA3006A2DE0084F5F7 /* NotulensaApp.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = NotulensaApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		ED0000000000000000000001 /* EDSDK.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = EDSDK.framework; path = Vendor/EDSDK.framework; sourceTree = "<group>"; };
+		ED0000000000000000000301 /* libCr_Core.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libCr_Core.dylib; path = Vendor/CrSDK/lib/libCr_Core.dylib; sourceTree = "<group>"; };
+		ED0000000000000000000303 /* libmonitor_protocol.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libmonitor_protocol.dylib; path = Vendor/CrSDK/lib/libmonitor_protocol.dylib; sourceTree = "<group>"; };
+		ED0000000000000000000305 /* libmonitor_protocol_pf.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libmonitor_protocol_pf.dylib; path = Vendor/CrSDK/lib/libmonitor_protocol_pf.dylib; sourceTree = "<group>"; };
+		ED0000000000000000000307 /* libCr_PTP_IP.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libCr_PTP_IP.dylib; path = Vendor/CrSDK/lib/libCr_PTP_IP.dylib; sourceTree = "<group>"; };
+		ED0000000000000000000309 /* libCr_PTP_USB.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libCr_PTP_USB.dylib; path = Vendor/CrSDK/lib/libCr_PTP_USB.dylib; sourceTree = "<group>"; };
+		ED000000000000000000030B /* libusb-1.0.0.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = "libusb-1.0.0.dylib"; path = "Vendor/CrSDK/lib/libusb-1.0.0.dylib"; sourceTree = "<group>"; };
+		ED000000000000000000030D /* libssh2.dylib */ = {isa = PBXFileReference; lastKnownFileType = "compiled.mach-o.dylib"; name = libssh2.dylib; path = Vendor/CrSDK/lib/libssh2.dylib; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -55,6 +86,13 @@
 			children = (
 				8B779BAC3006A2DE0084F5F7 /* NotulensaApp */,
 				ED0000000000000000000001 /* EDSDK.framework */,
+				ED0000000000000000000301 /* libCr_Core.dylib */,
+				ED0000000000000000000303 /* libmonitor_protocol.dylib */,
+				ED0000000000000000000305 /* libmonitor_protocol_pf.dylib */,
+				ED0000000000000000000307 /* libCr_PTP_IP.dylib */,
+				ED0000000000000000000309 /* libCr_PTP_USB.dylib */,
+				ED000000000000000000030B /* libusb-1.0.0.dylib */,
+				ED000000000000000000030D /* libssh2.dylib */,
 				8B779BAB3006A2DE0084F5F7 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -78,6 +116,7 @@
 				8B779BA73006A2DE0084F5F7 /* Frameworks */,
 				8B779BA83006A2DE0084F5F7 /* Resources */,
 				ED0000000000000000000201 /* Embed Frameworks */,
+				ED0000000000000000000400 /* Embed CrAdapter */,
 			);
 			buildRules = (
 			);
@@ -279,7 +318,10 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				FRAMEWORK_SEARCH_PATHS = "$(PROJECT_DIR)/Vendor";
 				GENERATE_INFOPLIST_FILE = YES;
-				HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/Vendor/EDSDKHeaders";
+				HEADER_SEARCH_PATHS = (
+					"$(PROJECT_DIR)/Vendor/EDSDKHeaders",
+					"$(PROJECT_DIR)/Vendor/CrSDK/include",
+				);
 				INFOPLIST_KEY_NSCameraUsageDescription = "Photobooth needs the camera to take photos during a session.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
@@ -294,8 +336,14 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
+				LIBRARY_SEARCH_PATHS = "$(PROJECT_DIR)/Vendor/CrSDK/lib";
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"-lCr_Core",
+					"-lmonitor_protocol",
+					"-lmonitor_protocol_pf",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = mansur.NotulensaApp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
@@ -328,7 +376,10 @@
 				ENABLE_USER_SELECTED_FILES = readonly;
 				FRAMEWORK_SEARCH_PATHS = "$(PROJECT_DIR)/Vendor";
 				GENERATE_INFOPLIST_FILE = YES;
-				HEADER_SEARCH_PATHS = "$(PROJECT_DIR)/Vendor/EDSDKHeaders";
+				HEADER_SEARCH_PATHS = (
+					"$(PROJECT_DIR)/Vendor/EDSDKHeaders",
+					"$(PROJECT_DIR)/Vendor/CrSDK/include",
+				);
 				INFOPLIST_KEY_NSCameraUsageDescription = "Photobooth needs the camera to take photos during a session.";
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphoneos*]" = YES;
 				"INFOPLIST_KEY_UIApplicationSceneManifest_Generation[sdk=iphonesimulator*]" = YES;
@@ -343,8 +394,14 @@
 				IPHONEOS_DEPLOYMENT_TARGET = 26.5;
 				LD_RUNPATH_SEARCH_PATHS = "@executable_path/Frameworks";
 				"LD_RUNPATH_SEARCH_PATHS[sdk=macosx*]" = "@executable_path/../Frameworks";
+				LIBRARY_SEARCH_PATHS = "$(PROJECT_DIR)/Vendor/CrSDK/lib";
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 1.0;
+				OTHER_LDFLAGS = (
+					"-lCr_Core",
+					"-lmonitor_protocol",
+					"-lmonitor_protocol_pf",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = mansur.NotulensaApp;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;

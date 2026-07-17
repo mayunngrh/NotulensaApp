@@ -3,10 +3,12 @@ import SwiftUI
 struct CameraPickerView: View {
     @ObservedObject var viewModel: KioskViewModel
     let onSelectCanon: () -> Void
+    let onSelectSony: () -> Void
     let onSelectWebcam: () -> Void
     let onCancel: () -> Void
 
     private var canon: CanonCameraService { viewModel.canon }
+    private var sony: SonyCameraService { viewModel.sony }
     private var webcam: CameraService { viewModel.camera }
 
     var body: some View {
@@ -39,7 +41,7 @@ struct CameraPickerView: View {
                                     .foregroundStyle(.green)
                             }
                             .frame(maxWidth: .infinity)
-                            .frame(height: 200)
+                            .frame(height: 160)
                             .background(Color.gray.opacity(0.1))
                             .cornerRadius(16)
                             .overlay(
@@ -60,7 +62,48 @@ struct CameraPickerView: View {
                                 .foregroundStyle(.gray)
                         }
                         .frame(maxWidth: .infinity)
-                        .frame(height: 200)
+                        .frame(height: 160)
+                        .background(Color.gray.opacity(0.1))
+                        .cornerRadius(16)
+                        .opacity(0.5)
+                    }
+
+                    if let sonyName = sony.cameraName {
+                        Button(action: onSelectSony) {
+                            VStack(spacing: 12) {
+                                Image(systemName: "camera.viewfinder")
+                                    .font(.system(size: 40))
+                                    .foregroundStyle(.cyan)
+                                Text(sonyName)
+                                    .font(.system(size: 18, weight: .semibold))
+                                    .foregroundStyle(.white)
+                                Text("Connected")
+                                    .font(.system(size: 14))
+                                    .foregroundStyle(.cyan)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .frame(height: 160)
+                            .background(Color.gray.opacity(0.1))
+                            .cornerRadius(16)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 16)
+                                    .stroke(Color.cyan.opacity(0.5), lineWidth: 2)
+                            )
+                        }
+                    } else {
+                        VStack(spacing: 12) {
+                            Image(systemName: "camera.viewfinder")
+                                .font(.system(size: 40))
+                                .foregroundStyle(.gray)
+                            Text("Sony Camera")
+                                .font(.system(size: 18, weight: .semibold))
+                                .foregroundStyle(.gray)
+                            Text("Not connected")
+                                .font(.system(size: 14))
+                                .foregroundStyle(.gray)
+                        }
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 160)
                         .background(Color.gray.opacity(0.1))
                         .cornerRadius(16)
                         .opacity(0.5)
@@ -79,7 +122,7 @@ struct CameraPickerView: View {
                                 .foregroundStyle(.blue)
                         }
                         .frame(maxWidth: .infinity)
-                        .frame(height: 200)
+                        .frame(height: 160)
                         .background(Color.gray.opacity(0.1))
                         .cornerRadius(16)
                         .overlay(

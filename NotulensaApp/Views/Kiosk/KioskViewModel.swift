@@ -25,22 +25,41 @@ final class KioskViewModel: ObservableObject {
     let event: Event
     let camera = CameraService()
     let canon = CanonCameraService.shared
+    let sony = SonyCameraService.shared
     private let evfClipRecorder = EvfClipRecorder()
     private var cameraMonitors = Set<AnyCancellable>()
+
+    enum LockedCamera {
+        case canon
+        case sony
+        case webcam
+    }
 
     /// Whichever camera was in use gets locked in for the rest of this kiosk launch —
     /// set once, on the first photo session. Prevents silently switching cameras
     /// mid-event if the other one happens to connect/disconnect later.
-    @Published private(set) var lockedUsesCanon: Bool?
-    var usesCanon: Bool { lockedUsesCanon ?? canon.isConnected }
+    @Published private(set) var lockedCamera: LockedCamera?
+
+    var usesCanon: Bool { lockedCamera == .canon }
+    var usesSony: Bool { lockedCamera == .sony }
+    var usesWebcam: Bool { lockedCamera == .webcam || lockedCamera == nil }
+
     /// True while the locked-in camera is unavailable — blocks starting/continuing a
     /// countdown and surfaces the "camera disconnected" alert via errorMessage.
     private var lockedCameraAvailable: Bool {
-        guard let lockedUsesCanon else { return true }
-        return lockedUsesCanon ? canon.isConnected : camera.isConnected
+        guard let lockedCamera else { return true }
+        switch lockedCamera {
+        case .canon: return canon.isConnected
+        case .sony: return sony.isConnected
+        case .webcam: return camera.isConnected
+        }
     }
     private var lockedCameraName: String {
-        (lockedUsesCanon ?? canon.isConnected) ? (canon.cameraName ?? "Canon camera") : "Webcam"
+        switch lockedCamera {
+        case .canon: return canon.cameraName ?? "Canon camera"
+        case .sony: return sony.cameraName ?? "Sony camera"
+        case .webcam, nil: return "Webcam"
+        }
     }
 
     @Published var state: State = .pickCamera
@@ -94,14 +113,21 @@ final class KioskViewModel: ObservableObject {
         canon.$isConnected
             .dropFirst()
             .sink { [weak self] connected in
-                guard let self, self.lockedUsesCanon == true, !connected else { return }
+                guard let self, self.lockedCamera == .canon, !connected else { return }
+                self.interruptForDisconnectedCamera()
+            }
+            .store(in: &cameraMonitors)
+        sony.$isConnected
+            .dropFirst()
+            .sink { [weak self] connected in
+                guard let self, self.lockedCamera == .sony, !connected else { return }
                 self.interruptForDisconnectedCamera()
             }
             .store(in: &cameraMonitors)
         camera.$isConnected
             .dropFirst()
             .sink { [weak self] connected in
-                guard let self, self.lockedUsesCanon == false, !connected else { return }
+                guard let self, self.lockedCamera == .webcam, !connected else { return }
                 self.interruptForDisconnectedCamera()
             }
             .store(in: &cameraMonitors)
@@ -138,7 +164,7 @@ final class KioskViewModel: ObservableObject {
         prepareDriveFolder()
         // If camera already locked from initial launch, proceed to template/capture.
         // Otherwise, show camera picker first.
-        if lockedUsesCanon != nil {
+        if lockedCamera != nil {
             // Camera already selected; go straight to template picker or capture.
             if event.templates.count == 1 {
                 template = event.templates[0]
@@ -153,16 +179,29 @@ final class KioskViewModel: ObservableObject {
         }
     }
 
-    func selectCamera(_ useCanon: Bool) {
-        lockedUsesCanon = useCanon
+    func selectCamera(_ which: LockedCamera) {
+        lockedCamera = which
         guard lockedCameraAvailable else {
             errorMessage = "\(lockedCameraName) is not connected. Please reconnect it before starting."
             return
         }
-        // Warm up both cameras: Canon resets its auto power-off timer, and webcam ensures
-        // the session is fully running.
-        canon.wake()
-        camera.warm()
+        // Wake/warm only the chosen camera and shut the others off — otherwise the webcam
+        // (or the other DSLR's EVF) keeps streaming in the background and can bleed into
+        // the preview.
+        switch which {
+        case .canon:
+            canon.wake()
+            sony.setEvfEnabled(false)
+            camera.stop()
+        case .sony:
+            sony.wake()
+            canon.setEvfEnabled(false)
+            camera.stop()
+        case .webcam:
+            camera.warm()
+            canon.setEvfEnabled(false)
+            sony.setEvfEnabled(false)
+        }
         // Warm up the clip recorder encoder to avoid initialization stall during first countdown.
         evfClipRecorder.warmup()
         // Go to idle view after camera selection so user sees idle media before starting.
@@ -223,28 +262,43 @@ final class KioskViewModel: ObservableObject {
         }
     }
 
-    // MARK: Camera source dispatch (webcam vs Canon EDSDK)
+    // MARK: Camera source dispatch (Canon EDSDK / Sony CrSDK / Webcam)
 
     private func takePhoto() async throws -> Data {
-        usesCanon ? try await canon.capturePhoto() : try await camera.capturePhoto()
+        switch lockedCamera {
+        case .canon:
+            try await canon.capturePhoto()
+        case .sony:
+            try await sony.capturePhoto()
+        case .webcam, nil:
+            try await camera.capturePhoto()
+        }
     }
 
     private func startClip(to url: URL) {
-        if usesCanon {
-            // Feed every camera-cadence EVF frame straight into the recorder.
+        switch lockedCamera {
+        case .canon:
             let tap = evfClipRecorder.start(to: url)
             canon.frameTap = tap
-        } else {
+        case .sony:
+            let tap = evfClipRecorder.start(to: url)
+            sony.frameTap = tap
+        case .webcam, nil:
             camera.startRecording(to: url)
         }
     }
 
     private func stopClip() async -> URL? {
-        if usesCanon {
+        switch lockedCamera {
+        case .canon:
             canon.frameTap = nil
             return await evfClipRecorder.stop()
+        case .sony:
+            sony.frameTap = nil
+            return await evfClipRecorder.stop()
+        case .webcam, nil:
+            return await camera.stopRecording()
         }
-        return await camera.stopRecording()
     }
 
     private func scheduleAutoAdvance() {

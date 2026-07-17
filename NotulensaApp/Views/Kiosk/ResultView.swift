@@ -48,42 +48,67 @@ struct ResultView: View {
     }
 
     var body: some View {
-        VStack(spacing: 24) {
-            Text("Here's Your Photo!")
-                .font(.system(size: 36, weight: .bold))
-                .foregroundStyle(.white)
-                .padding(.top, 30)
+        ZStack {
+            Color.black.ignoresSafeArea()
 
-            if availableTabs.count > 1 {
-                Picker("", selection: $tab) {
-                    ForEach(availableTabs) { Text($0.rawValue).tag($0) }
+            VStack(spacing: 0) {
+                // Top bar with title and tab picker
+                VStack(spacing: 12) {
+                    Text("Here's Your Photo!")
+                        .font(.system(size: 32, weight: .bold))
+                        .foregroundStyle(.white)
+
+                    if availableTabs.count > 1 {
+                        Picker("", selection: $tab) {
+                            ForEach(availableTabs) { Text($0.rawValue).tag($0) }
+                        }
+                        .pickerStyle(.segmented)
+                        .frame(width: 320)
+                    }
                 }
-                .pickerStyle(.segmented)
-                .frame(width: 360)
+                .padding(.top, 20)
+                .padding(.bottom, 16)
+
+                // Main content: large photo with icon overlay
+                ZStack(alignment: .topTrailing) {
+                    preview
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .padding(20)
+
+                    // Vertical icon overlay on right side
+                    VStack(spacing: 16) {
+                        iconButton(icon: "square.and.arrow.up", size: 28) {
+                            ShareService.airDrop(fileURL: activeURL)
+                        }
+                        iconButton(icon: "printer.fill", size: 28) {
+                            ShareService.print(fileURL: result.printableURL)
+                        }
+                        iconButton(icon: "qrcode", size: 28) {
+                            showQR = true
+                        }
+                    }
+                    .padding(.top, 30)
+                    .padding(.trailing, 24)
+                }
+
+                // Bottom bar with Done button
+                HStack {
+                    Button(action: onDone) {
+                        Text("Done")
+                            .font(.system(size: 16, weight: .semibold))
+                            .foregroundStyle(.white)
+                            .frame(width: 100)
+                            .frame(height: 44)
+                            .background(Color.gray.opacity(0.3))
+                            .cornerRadius(8)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
             }
-
-            preview
-                .frame(maxHeight: 480)
-                .clipShape(RoundedRectangle(cornerRadius: 16))
-                .shadow(radius: 16)
-
-            HStack(spacing: 24) {
-                actionButton("Share via AirDrop", icon: "square.and.arrow.up") {
-                    ShareService.airDrop(fileURL: activeURL)
-                }
-                actionButton("Print", icon: "printer.fill") {
-                    ShareService.print(fileURL: result.printableURL)
-                }
-                actionButton("Scan QR", icon: "qrcode") {
-                    showQR = true
-                }
-            }
-
-            Button("Done", action: onDone)
-                .controlSize(.large)
-                .padding(.bottom, 30)
         }
-        .padding(.horizontal, 60)
         .contentShape(Rectangle())
         .onTapGesture { restartIdleTimer() }
         .onAppear { restartIdleTimer() }
@@ -93,6 +118,21 @@ struct ResultView: View {
         .sheet(isPresented: $showQR) {
             qrSheet
         }
+    }
+
+    private func iconButton(icon: String, size: CGFloat, action: @escaping () -> Void) -> some View {
+        Button(action: {
+            restartIdleTimer()
+            action()
+        }) {
+            Image(systemName: icon)
+                .font(.system(size: size))
+                .foregroundStyle(.white)
+                .frame(width: 56, height: 56)
+                .background(Color.pink.opacity(0.8))
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
     }
 
     @ViewBuilder
@@ -124,20 +164,6 @@ struct ResultView: View {
         p.play()
     }
 
-    private func actionButton(_ title: String, icon: String, action: @escaping () -> Void) -> some View {
-        Button {
-            restartIdleTimer()
-            action()
-        } label: {
-            Label(title, systemImage: icon)
-                .font(.title3.bold())
-                .padding(.horizontal, 20)
-                .padding(.vertical, 14)
-        }
-        .buttonStyle(.borderedProminent)
-        .controlSize(.large)
-        .tint(.pink)
-    }
 
     private var qrSheet: some View {
         VStack(spacing: 20) {

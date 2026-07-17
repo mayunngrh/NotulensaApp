@@ -17,6 +17,7 @@ struct ContentView: View {
     @StateObject private var router = AppRouter()
     @StateObject private var store = PhotoboothStore.shared
     @ObservedObject private var canon = CanonCameraService.shared
+    @ObservedObject private var sony = SonyCameraService.shared
 
     var body: some View {
         Group {
@@ -30,9 +31,10 @@ struct ContentView: View {
         .environmentObject(store)
         .task {
             canon.startMonitoring()
+            sony.startMonitoring()
         }
         .overlay(alignment: .top) {
-            if let toast = canon.toast {
+            if let toast = canon.toast ?? sony.toast {
                 Label(toast, systemImage: "camera.badge.ellipsis")
                     .font(.callout.bold())
                     .padding(.horizontal, 20)
@@ -44,5 +46,6 @@ struct ContentView: View {
             }
         }
         .animation(.spring(duration: 0.4), value: canon.toast)
+        .animation(.spring(duration: 0.4), value: sony.toast)
     }
 }

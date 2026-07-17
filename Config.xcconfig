@@ -1,0 +1,7 @@
+// Sony SDK paths
+HEADER_SEARCH_PATHS = $(inherited) $(SRCROOT)/Vendor/CrSDK/include $(SRCROOT)/Vendor/EDSDKHeaders
+LIBRARY_SEARCH_PATHS = $(inherited) $(SRCROOT)/Vendor/CrSDK/lib $(SRCROOT)/Vendor/EDSDK.framework
+OTHER_LDFLAGS = $(inherited) -lCr_Core -lmonitor_protocol -lmonitor_protocol_pf -lCr_PTP_IP -lCr_PTP_USB -lusb-1.0.0 -lssh2
+
+// Bridging header
+SWIFT_OBJC_BRIDGING_HEADER = NotulensaApp/NotulensaApp-Bridging-Header.h

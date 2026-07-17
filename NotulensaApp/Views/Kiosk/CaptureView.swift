@@ -6,6 +6,8 @@ struct CaptureView: View {
     @ObservedObject var viewModel: KioskViewModel
     /// Observed so the Canon live-view state (evfReady / errorMessage) refreshes the preview.
     @ObservedObject private var canon = CanonCameraService.shared
+    /// Observed so the Sony live-view state (evfReady / errorMessage) refreshes the preview.
+    @ObservedObject private var sony = SonyCameraService.shared
 
     var body: some View {
         // The camera preview stays mounted the whole time capturing is active — swapping it
@@ -89,6 +91,21 @@ struct CaptureView: View {
                         VStack(spacing: 16) {
                             ProgressView().controlSize(.large).tint(.white)
                             Text(canon.errorMessage ?? "Connecting to Canon camera…")
+                                .font(.title3)
+                                .foregroundStyle(.white.opacity(0.8))
+                        }
+                    }
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .ignoresSafeArea()
+            } else if viewModel.usesSony {
+                Group {
+                    if sony.isConnected && sony.evfReady {
+                        SonyEvfPreviewView()
+                    } else {
+                        VStack(spacing: 16) {
+                            ProgressView().controlSize(.large).tint(.white)
+                            Text(sony.errorMessage ?? "Connecting to Sony camera…")
                                 .font(.title3)
                                 .foregroundStyle(.white.opacity(0.8))
                         }
