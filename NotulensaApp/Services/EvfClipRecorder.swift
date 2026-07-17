@@ -1,18 +1,22 @@
 import Foundation
 import AVFoundation
 import CoreGraphics
+import QuartzCore
 
 /// Records Canon EVF live-view frames into a video clip (for the live photo output).
 ///
-/// Frame-tap driven with stable frame timing and backpressure handling:
-/// - Timestamps based on frame count (not wall clock) for consistent ~33ms intervals
-/// - Queues frames even if encoder is busy (up to 60-frame buffer) instead of dropping
-/// - Optimized pixel buffer handling to reduce encoder stalls
-/// - All work on dedicated serial queue, never main thread
+/// Frame-tap driven with real capture timing and backpressure handling:
+/// - Timestamps are the real elapsed time each frame arrived (not an assumed constant
+///   rate) so played-back motion matches how the camera actually delivered frames —
+///   EVF cadence isn't perfectly constant, and forcing a fixed 30fps grid made motion
+///   look uneven/laggy even though no frames were dropped.
+/// - Queues frames even if the encoder is momentarily busy (bounded buffer) instead of
+///   dropping — this is what makes real timestamps safe: no drops means no gaps to
+///   paper over.
+/// - All work on a dedicated serial queue, never the main thread.
 final class EvfClipRecorder: @unchecked Sendable {
     private static let width = 1280
     private static let height = 720
-    private static let frameDuration = CMTime(value: 1, timescale: 30)
 
     private let queue = DispatchQueue(label: "evf.clip.recorder", qos: .userInitiated)
     private var writer: AVAssetWriter?
@@ -21,6 +25,7 @@ final class EvfClipRecorder: @unchecked Sendable {
     private var pixelBufferPool: CVPixelBufferPool?
     private var frameQueue: [(CGImage, CMTime)] = []
     private var frameCount = 0
+    private var startTime: CFTimeInterval = 0
     private var outputURL: URL?
     private var encodingTask: Task<Void, Never>?
 
@@ -59,18 +64,22 @@ final class EvfClipRecorder: @unchecked Sendable {
             self.outputURL = url
             self.frameCount = 0
             self.frameQueue = []
+            self.startTime = CACurrentMediaTime()
             self.startEncodingLoop()
         }
         return { [weak self] image in
-            self?.enqueueFrame(image)
+            // Stamp the real arrival time right here on the SDK thread, at the moment
+            // the frame actually arrived — not later when the queue happens to drain it.
+            let elapsed = CACurrentMediaTime() - (self?.startTime ?? 0)
+            self?.enqueueFrame(image, at: elapsed)
         }
     }
 
     /// Queue frame for encoding (called from SDK thread, doesn't block).
-    private func enqueueFrame(_ image: CGImage) {
+    private func enqueueFrame(_ image: CGImage, at elapsed: CFTimeInterval) {
         queue.async { [weak self] in
             guard let self else { return }
-            let time = CMTime(value: Int64(self.frameCount), timescale: 30)
+            let time = CMTime(seconds: elapsed, preferredTimescale: 600)
             self.frameQueue.append((image, time))
             self.frameCount += 1
             if self.frameQueue.count > 60 { self.frameQueue.removeFirst() }

@@ -15,6 +15,21 @@ struct IdleView: View {
         ZStack {
             idleMedia
                 .ignoresSafeArea()
+
+            VStack(alignment: .leading) {
+                Button {
+                    onExit()
+                } label: {
+                    Image(systemName: "chevron.left.circle.fill")
+                        .font(.system(size: 32))
+                        .foregroundStyle(.white)
+                }
+                .buttonStyle(.plain)
+                .padding(20)
+
+                Spacer()
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .contentShape(Rectangle())
         .onTapGesture(perform: onContinue)

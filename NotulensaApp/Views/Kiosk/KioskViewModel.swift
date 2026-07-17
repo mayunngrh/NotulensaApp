@@ -25,9 +25,22 @@ final class KioskViewModel: ObservableObject {
     let camera = CameraService()
     let canon = CanonCameraService.shared
     private let evfClipRecorder = EvfClipRecorder()
+    private var cameraMonitors = Set<AnyCancellable>()
 
-    /// Canon body wins whenever one is plugged in; webcam otherwise.
-    var usesCanon: Bool { canon.isConnected }
+    /// Whichever camera was in use gets locked in for the rest of this kiosk launch —
+    /// set once, on the first photo session. Prevents silently switching cameras
+    /// mid-event if the other one happens to connect/disconnect later.
+    @Published private(set) var lockedUsesCanon: Bool?
+    var usesCanon: Bool { lockedUsesCanon ?? canon.isConnected }
+    /// True while the locked-in camera is unavailable — blocks starting/continuing a
+    /// countdown and surfaces the "camera disconnected" alert via errorMessage.
+    private var lockedCameraAvailable: Bool {
+        guard let lockedUsesCanon else { return true }
+        return lockedUsesCanon ? canon.isConnected : camera.isConnected
+    }
+    private var lockedCameraName: String {
+        (lockedUsesCanon ?? canon.isConnected) ? (canon.cameraName ?? "Canon camera") : "Webcam"
+    }
 
     @Published var state: State = .idle
     var template: PhotoTemplate?
@@ -70,6 +83,36 @@ final class KioskViewModel: ObservableObject {
 
     init(event: Event) {
         self.event = event
+        observeCameraDisconnects()
+    }
+
+    /// Watches whichever camera ends up locked in; if it disconnects mid-countdown,
+    /// halt the capture and surface an alert instead of silently falling back to the
+    /// other camera or failing the shutter with a confusing error.
+    private func observeCameraDisconnects() {
+        canon.$isConnected
+            .dropFirst()
+            .sink { [weak self] connected in
+                guard let self, self.lockedUsesCanon == true, !connected else { return }
+                self.interruptForDisconnectedCamera()
+            }
+            .store(in: &cameraMonitors)
+        camera.$isConnected
+            .dropFirst()
+            .sink { [weak self] connected in
+                guard let self, self.lockedUsesCanon == false, !connected else { return }
+                self.interruptForDisconnectedCamera()
+            }
+            .store(in: &cameraMonitors)
+    }
+
+    private func interruptForDisconnectedCamera() {
+        guard case .capturing = state else { return }
+        captureTask?.cancel()
+        reviewTask?.cancel()
+        countdown = nil
+        Task { _ = await stopClip() }
+        errorMessage = "\(lockedCameraName) disconnected. Please reconnect it to continue this session."
     }
 
     // MARK: Flow — idle / welcome / gallery
@@ -83,6 +126,16 @@ final class KioskViewModel: ObservableObject {
     }
 
     func startSession() {
+        // Lock in whichever camera is active right now — stays fixed for the rest of
+        // this kiosk launch so a later connect/disconnect of the other camera can't
+        // silently swap the capture source mid-event.
+        if lockedUsesCanon == nil {
+            lockedUsesCanon = canon.isConnected
+        }
+        guard lockedCameraAvailable else {
+            errorMessage = "\(lockedCameraName) is not connected. Please reconnect it before starting."
+            return
+        }
         // Warm up both cameras before the first countdown: Canon resets its
         // auto power-off timer, and webcam ensures the session is fully running.
         canon.wake()
@@ -114,6 +167,12 @@ final class KioskViewModel: ObservableObject {
     // MARK: Capture
 
     func beginCountdown() {
+        // Never start (or retry) a countdown on a locked-in camera that's currently
+        // disconnected — surface the alert instead of shooting on the wrong camera.
+        guard lockedCameraAvailable else {
+            errorMessage = "\(lockedCameraName) disconnected. Please reconnect it to continue."
+            return
+        }
         // Warm up both cameras before every countdown: Canon reconnects if it dozed,
         // and webcam ensures the session stays running.
         canon.wake()

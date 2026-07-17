@@ -19,8 +19,12 @@ final class CanonCameraService: ObservableObject {
 
     // MARK: Published state (main actor)
 
-    /// Latest live-view frame (read by the clip recorder).
-    @Published private(set) var evfImage: CGImage?
+    /// Latest live-view frame — read once as an initial value by CanonEvfPreviewView;
+    /// every subsequent frame goes through evfFrameSink instead. Deliberately NOT
+    /// @Published: it used to be, and reassigning it 30x/sec fired objectWillChange on
+    /// every frame, forcing every view holding @ObservedObject var canon (CaptureView)
+    /// to fully re-render its body every frame — the actual cause of preview stutter.
+    private(set) var evfImage: CGImage?
     /// True once frames are flowing — the UI's "show preview vs spinner" flag.
     @Published private(set) var evfReady = false
     /// Direct per-frame sink for the preview layer (bypasses SwiftUI re-rendering).
@@ -326,7 +330,11 @@ final class CanonCameraService: ObservableObject {
         DispatchQueue.main.async {
             let service = CanonCameraService.shared
             service.evfImage = image
-            service.evfReady = true
+            // Only publish when this actually flips false→true — @Published fires
+            // objectWillChange on every assignment regardless of value equality, and
+            // this callback runs every frame (~30fps), so reassigning true→true here
+            // would re-render every view observing the service on every single frame.
+            if !service.evfReady { service.evfReady = true }
             service.evfFrameSink?(image)
         }
     }

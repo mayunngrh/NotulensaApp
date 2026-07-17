@@ -35,6 +35,9 @@ struct KioskView: View {
             viewModel.camera.stop()
         }
         .onChange(of: viewModel.canon.isConnected) { _ in
+            // Once a camera is locked in for this kiosk launch, leave it alone — don't
+            // let the *other* camera connecting/disconnecting touch its running session.
+            guard viewModel.lockedUsesCanon == nil else { return }
             if viewModel.canon.isConnected {
                 viewModel.camera.stop()
             } else {
@@ -59,10 +62,21 @@ struct KioskView: View {
                 exitKiosk()
             }
         case .welcome:
-            WelcomeView(event: event) {
+            WelcomeView(event: event, viewModel: vm) {
                 vm.startSession()
             } onGallery: {
                 vm.showGallery()
+            } onClose: {
+                if !vm.shots.isEmpty {
+                    vm.reviewShot = vm.shots[vm.currentOrder]
+                    vm.state = .result(SessionResult(
+                        printableURL: URL(fileURLWithPath: ""),
+                        slideshowURL: nil,
+                        livePhotoURL: nil
+                    ))
+                } else {
+                    vm.backToIdle()
+                }
             }
             .overlay(alignment: .topTrailing) {
                 Color.clear

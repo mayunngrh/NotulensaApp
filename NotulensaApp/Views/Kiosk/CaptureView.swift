@@ -28,6 +28,42 @@ struct CaptureView: View {
                     .padding(.top, 30)
             }
         }
+        .overlay(alignment: .bottom) {
+            if viewModel.reviewShot != nil, !viewModel.shots.isEmpty {
+                VStack(spacing: 12) {
+                    Text("Photos Taken: \(viewModel.shots.count)")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 12) {
+                            ForEach(Array(viewModel.shots.keys).sorted(), id: \.self) { order in
+                                if let data = viewModel.shots[order],
+                                   let image = NSImage(data: data) {
+                                    Image(nsImage: image)
+                                        .resizable()
+                                        .scaledToFill()
+                                        .frame(width: 60, height: 80)
+                                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                                        .overlay {
+                                            RoundedRectangle(cornerRadius: 6)
+                                                .stroke(
+                                                    order == viewModel.currentOrder ? Color.yellow : Color.gray,
+                                                    lineWidth: 2
+                                                )
+                                        }
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                    }
+                    .frame(height: 100)
+                }
+                .padding(.vertical, 16)
+                .background(.black.opacity(0.6))
+                .padding(.bottom, 40)
+            }
+        }
         .alert("Something went wrong", isPresented: .constant(viewModel.errorMessage != nil)) {
             Button("Try Again") {
                 viewModel.errorMessage = nil

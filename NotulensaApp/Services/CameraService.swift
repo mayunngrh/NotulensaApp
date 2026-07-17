@@ -9,7 +9,14 @@ final class CameraService: ObservableObject {
     private let photoOutput = AVCapturePhotoOutput()
     private let movieOutput = AVCaptureMovieFileOutput()
     private var movieDelegate: MovieRecordingDelegate?
+    private var device: AVCaptureDevice?
+    private var disconnectObserver: NSObjectProtocol?
     @Published private(set) var isConfigured = false
+    /// True once the device is configured and its input hasn't been unplugged.
+    /// Distinct from `isConfigured` (which never goes back to false): this flips to
+    /// false the moment the physical device disconnects, so a session that locked
+    /// onto the webcam can detect the disconnect instead of silently continuing.
+    @Published private(set) var isConnected = false
     @Published var errorMessage: String?
 
     func start() async {
@@ -21,6 +28,7 @@ final class CameraService: ObservableObject {
             configure()
         }
         guard isConfigured else { return }
+        isConnected = true
         let session = self.session
         Task.detached { session.startRunning() }
     }
@@ -64,6 +72,16 @@ final class CameraService: ObservableObject {
         guard let device = discovery.devices.first ?? AVCaptureDevice.default(for: .video) else {
             errorMessage = "No camera found."
             return
+        }
+        self.device = device
+        if let disconnectObserver {
+            NotificationCenter.default.removeObserver(disconnectObserver)
+        }
+        disconnectObserver = NotificationCenter.default.addObserver(
+            forName: AVCaptureDevice.wasDisconnectedNotification,
+            object: device, queue: .main
+        ) { [weak self] _ in
+            self?.isConnected = false
         }
         session.beginConfiguration()
         session.sessionPreset = .high
