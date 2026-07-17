@@ -18,8 +18,7 @@ final class Event: ObservableObject, Identifiable, Codable {
 
     // MARK: Capture settings
     @Published var cameraSource: String
-    @Published var countdownFirst: Int
-    @Published var countdownOthers: Int
+    @Published var countdown: Int
     @Published var reviewSeconds: Int
 
     // MARK: Slideshow settings (kept "gif" names for storage compatibility)
@@ -43,8 +42,7 @@ final class Event: ObservableObject, Identifiable, Codable {
         self.galleryButtonRelX = 0.5
         self.galleryButtonRelY = 0.86
         self.cameraSource = "webcam"
-        self.countdownFirst = 5
-        self.countdownOthers = 3
+        self.countdown = 5
         self.reviewSeconds = 5
         self.gifWidth = 720
         self.gifFrameSeconds = 0.8
@@ -70,7 +68,7 @@ final class Event: ObservableObject, Identifiable, Codable {
     enum CodingKeys: String, CodingKey {
         case id, name, createdAt, idleMediaPath, welcomeBackgroundPath
         case startButtonRelX, startButtonRelY, galleryButtonRelX, galleryButtonRelY
-        case cameraSource, countdownFirst, countdownOthers, reviewSeconds
+        case cameraSource, countdown, countdownFirst, countdownOthers, reviewSeconds
         case gifWidth, gifFrameSeconds, livePhotoLoops, templates, captures
     }
 
@@ -86,8 +84,7 @@ final class Event: ObservableObject, Identifiable, Codable {
         galleryButtonRelX = (try? c.decode(Double.self, forKey: .galleryButtonRelX)) ?? 0.5
         galleryButtonRelY = (try? c.decode(Double.self, forKey: .galleryButtonRelY)) ?? 0.86
         cameraSource = (try? c.decode(String.self, forKey: .cameraSource)) ?? "webcam"
-        countdownFirst = (try? c.decode(Int.self, forKey: .countdownFirst)) ?? 5
-        countdownOthers = (try? c.decode(Int.self, forKey: .countdownOthers)) ?? 3
+        countdown = (try? c.decode(Int.self, forKey: .countdown)) ?? (try? c.decode(Int.self, forKey: .countdownFirst)) ?? 5
         reviewSeconds = (try? c.decode(Int.self, forKey: .reviewSeconds)) ?? 5
         gifWidth = (try? c.decode(Int.self, forKey: .gifWidth)) ?? 720
         gifFrameSeconds = (try? c.decode(Double.self, forKey: .gifFrameSeconds)) ?? 0.8
@@ -108,8 +105,7 @@ final class Event: ObservableObject, Identifiable, Codable {
         try c.encode(galleryButtonRelX, forKey: .galleryButtonRelX)
         try c.encode(galleryButtonRelY, forKey: .galleryButtonRelY)
         try c.encode(cameraSource, forKey: .cameraSource)
-        try c.encode(countdownFirst, forKey: .countdownFirst)
-        try c.encode(countdownOthers, forKey: .countdownOthers)
+        try c.encode(countdown, forKey: .countdown)
         try c.encode(reviewSeconds, forKey: .reviewSeconds)
         try c.encode(gifWidth, forKey: .gifWidth)
         try c.encode(gifFrameSeconds, forKey: .gifFrameSeconds)

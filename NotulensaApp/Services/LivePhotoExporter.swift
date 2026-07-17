@@ -22,7 +22,9 @@ enum LivePhotoExporter {
         let slots: [SlotSnapshot]
     }
 
-    static let fps: Int32 = 12
+    /// Match the recorded clip rate (30fps) to avoid frame skipping, which reads as jank
+    /// even if individual frames are rendered cleanly.
+    static let fps: Int32 = 30
 
     static func export(template: TemplateSnapshot, clipsByOrder: [Int: URL], loops: Int, eventID: String) async throws -> String {
         let assets = clipsByOrder.mapValues { AVURLAsset(url: $0) }
@@ -31,21 +33,21 @@ enum LivePhotoExporter {
         for (order, asset) in assets {
             let gen = AVAssetImageGenerator(asset: asset)
             gen.appliesPreferredTrackTransform = true
-            // Exact-frame seeking (.zero tolerance) frequently fails on the first few frames
-            // of a freshly-recorded clip (no keyframe yet), leaving that slot blank/black for
-            // a moment — which reads as an unwanted fade-in once composited. A little slack
-            // lets it snap to the nearest available frame instead.
-            gen.requestedTimeToleranceBefore = CMTime(seconds: 0.2, preferredTimescale: 600)
-            gen.requestedTimeToleranceAfter = CMTime(seconds: 0.2, preferredTimescale: 600)
+            // Use moderate tolerance (33ms = 1 frame at 30fps) to handle timing jitter
+            // without snapping too far to wrong keyframes.
+            let tolerance = CMTime(seconds: 1.0 / Double(fps), preferredTimescale: 600)
+            gen.requestedTimeToleranceBefore = tolerance
+            gen.requestedTimeToleranceAfter = tolerance
             generators[order] = gen
             durations[order] = try await asset.load(.duration).seconds
         }
         guard let clipDuration = durations.values.min(), clipDuration > 0 else {
             throw ExportError.noClips
         }
+        // Always extract at 30fps for consistent output timing
         let frameCount = max(1, Int(clipDuration * Double(fps)))
 
-        let scale = min(1.0, 1080.0 / max(template.canvasWidth, template.canvasHeight))
+        let scale = min(1.0, 360.0 / max(template.canvasWidth, template.canvasHeight))
         let outW = Int(template.canvasWidth * scale)
         let outH = Int(template.canvasHeight * scale)
 
@@ -59,7 +61,12 @@ enum LivePhotoExporter {
         let settings: [String: Any] = [
             AVVideoCodecKey: AVVideoCodecType.h264,
             AVVideoWidthKey: outW,
-            AVVideoHeightKey: outH
+            AVVideoHeightKey: outH,
+            AVVideoCompressionPropertiesKey: [
+                AVVideoAverageBitRateKey: 1_500_000,
+                AVVideoMaxKeyFrameIntervalKey: 30,
+                AVVideoExpectedSourceFrameRateKey: NSNumber(value: fps)
+            ] as [String: Any]
         ]
         let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
         input.expectsMediaDataInRealTime = false

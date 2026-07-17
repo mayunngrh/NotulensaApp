@@ -29,6 +29,17 @@ final class EvfClipRecorder: @unchecked Sendable {
     private var outputURL: URL?
     private var encodingTask: Task<Void, Never>?
 
+    /// Warm up the encoder and buffer pools on a background queue (non-blocking).
+    /// Call this during session initialization to avoid a stall during the first countdown.
+    func warmup() {
+        queue.async { [weak self] in
+            guard let self else { return }
+            let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("warmup-\(UUID().uuidString).mp4")
+            _ = try? AVAssetWriter(outputURL: tempURL, fileType: .mp4)
+            try? FileManager.default.removeItem(at: tempURL)
+        }
+    }
+
     /// Begins recording. Returns a closure to install as the camera's `frameTap`.
     func start(to url: URL) -> (CGImage) -> Void {
         queue.sync {

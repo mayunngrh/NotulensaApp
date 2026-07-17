@@ -88,6 +88,14 @@ struct KioskView: View {
             GalleryView(event: event) {
                 vm.showWelcome()
             }
+        case .pickCamera:
+            CameraPickerView(viewModel: vm) {
+                vm.selectCamera(true)
+            } onSelectWebcam: {
+                vm.selectCamera(false)
+            } onCancel: {
+                vm.backToWelcome()
+            }
         case .pickTemplate:
             TemplatePickerView(event: event) { template in
                 vm.pick(template)

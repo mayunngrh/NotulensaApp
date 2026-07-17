@@ -22,12 +22,11 @@ struct CaptureSettingsView: View {
             }
 
             Section {
-                Stepper("First photo: \(event.countdownFirst)s", value: $event.countdownFirst, in: 1...15)
-                Stepper("Other photos: \(event.countdownOthers)s", value: $event.countdownOthers, in: 1...15)
+                Stepper("Countdown: \(event.countdown)s", value: $event.countdown, in: 1...15)
             } header: {
                 Text("Countdown")
             } footer: {
-                Text("Seconds shown before each shot. The first photo often gets extra time to get ready.")
+                Text("Seconds shown before each shot.")
             }
 
             Section {

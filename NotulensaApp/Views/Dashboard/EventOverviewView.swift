@@ -60,15 +60,14 @@ struct EventOverviewView: View {
                 section("Capture Settings") {
                     Grid(alignment: .leading, horizontalSpacing: 24, verticalSpacing: 8) {
                         GridRow {
-                            settingItem("Countdown (1st photo)", "\(event.countdownFirst)s", icon: "timer")
-                            settingItem("Countdown (others)", "\(event.countdownOthers)s", icon: "timer")
-                        }
-                        GridRow {
+                            settingItem("Countdown", "\(event.countdown)s", icon: "timer")
                             settingItem("Review each photo", "\(event.reviewSeconds)s", icon: "eye")
-                            settingItem("Live photo loops", "\(event.livePhotoLoops)×", icon: "livephoto")
                         }
                         GridRow {
+                            settingItem("Live photo loops", "\(event.livePhotoLoops)×", icon: "livephoto")
                             settingItem("GIF width", "\(event.gifWidth)px", icon: "photo.stack")
+                        }
+                        GridRow {
                             settingItem("GIF frame time", event.gifFrameSeconds.formatted(.number.precision(.fractionLength(1))) + "s", icon: "clock")
                         }
                     }

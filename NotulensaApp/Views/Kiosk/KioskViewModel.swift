@@ -15,6 +15,7 @@ final class KioskViewModel: ObservableObject {
         case idle
         case welcome
         case gallery
+        case pickCamera
         case pickTemplate
         case capturing
         case processing
@@ -42,7 +43,7 @@ final class KioskViewModel: ObservableObject {
         (lockedUsesCanon ?? canon.isConnected) ? (canon.cameraName ?? "Canon camera") : "Webcam"
     }
 
-    @Published var state: State = .idle
+    @Published var state: State = .pickCamera
     var template: PhotoTemplate?
     /// Captured JPEGs keyed by 1-based slot order.
     var shots: [Int: Data] = [:]
@@ -126,20 +127,6 @@ final class KioskViewModel: ObservableObject {
     }
 
     func startSession() {
-        // Lock in whichever camera is active right now — stays fixed for the rest of
-        // this kiosk launch so a later connect/disconnect of the other camera can't
-        // silently swap the capture source mid-event.
-        if lockedUsesCanon == nil {
-            lockedUsesCanon = canon.isConnected
-        }
-        guard lockedCameraAvailable else {
-            errorMessage = "\(lockedCameraName) is not connected. Please reconnect it before starting."
-            return
-        }
-        // Warm up both cameras before the first countdown: Canon resets its
-        // auto power-off timer, and webcam ensures the session is fully running.
-        canon.wake()
-        camera.warm()
         shots = [:]
         clips = [:]
         currentOrder = 1
@@ -149,13 +136,37 @@ final class KioskViewModel: ObservableObject {
         driveLink = nil
         pendingDriveURL = nil
         prepareDriveFolder()
-        if event.templates.count == 1 {
-            template = event.templates[0]
-            state = .capturing
-            beginCountdown()
+        // If camera already locked from initial launch, proceed to template/capture.
+        // Otherwise, show camera picker first.
+        if lockedUsesCanon != nil {
+            // Camera already selected; go straight to template picker or capture.
+            if event.templates.count == 1 {
+                template = event.templates[0]
+                state = .capturing
+                beginCountdown()
+            } else {
+                state = .pickTemplate
+            }
         } else {
-            state = .pickTemplate
+            // First time; show camera picker.
+            state = .pickCamera
         }
+    }
+
+    func selectCamera(_ useCanon: Bool) {
+        lockedUsesCanon = useCanon
+        guard lockedCameraAvailable else {
+            errorMessage = "\(lockedCameraName) is not connected. Please reconnect it before starting."
+            return
+        }
+        // Warm up both cameras: Canon resets its auto power-off timer, and webcam ensures
+        // the session is fully running.
+        canon.wake()
+        camera.warm()
+        // Warm up the clip recorder encoder to avoid initialization stall during first countdown.
+        evfClipRecorder.warmup()
+        // Go to idle view after camera selection so user sees idle media before starting.
+        state = .idle
     }
 
     func pick(_ template: PhotoTemplate) {
@@ -180,7 +191,7 @@ final class KioskViewModel: ObservableObject {
         reviewTask?.cancel()
         reviewShot = nil
         captureTask?.cancel()
-        let seconds = currentOrder == 1 ? event.countdownFirst : event.countdownOthers
+        let seconds = event.countdown
         captureTask = Task { [weak self] in
             guard let self else { return }
             let clipURL = FileManager.default.temporaryDirectory.appendingPathComponent("clip-\(UUID().uuidString).mov")
