@@ -15,17 +15,6 @@ struct IdleView: View {
         ZStack {
             idleMedia
                 .ignoresSafeArea()
-
-            VStack {
-                Spacer()
-                Text("Tap to Start")
-                    .font(.system(size: 32, weight: .bold))
-                    .foregroundStyle(.white)
-                    .padding(.horizontal, 40)
-                    .padding(.vertical, 16)
-                    .background(.black.opacity(0.4), in: Capsule())
-                    .padding(.bottom, 80)
-            }
         }
         .contentShape(Rectangle())
         .onTapGesture(perform: onContinue)

@@ -137,11 +137,11 @@ final class CanonCameraService: ObservableObject {
     }
 
     /// EVF poll at ~120 Hz: when no new frame is ready EDSDK returns OBJECT_NOTREADY
-    /// immediately, so this catches every frame the body produces (~30 fps on the RP)
-    /// with minimal latency. Runs entirely on the SDK thread.
+    /// immediately at maximum frequency, so this catches every frame the body produces
+    /// (~30 fps on the RP) with ~4ms latency. Runs entirely on the SDK thread.
     private nonisolated func startEvfLoop() {
         guard evfLoop == nil else { return }
-        evfLoop = makeTimer(interval: .milliseconds(8), leeway: .milliseconds(2)) { [weak self] in
+        evfLoop = makeTimer(interval: .milliseconds(4), leeway: .milliseconds(0)) { [weak self] in
             guard let self, self.connectedFlag, self.evfActive else { return }
             self.sdkDownloadEvfFrame()
         }

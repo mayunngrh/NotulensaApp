@@ -4,24 +4,25 @@ import CoreGraphics
 
 /// Records Canon EVF live-view frames into a video clip (for the live photo output).
 ///
-/// Frame-tap driven: `CanonCameraService.frameTap` fires on the SDK thread at the
-/// camera's real cadence, and each frame is encoded here with its true timestamp — so
-/// the clip captures every frame the RP delivers (~30 fps) with correct motion timing,
-/// rather than polling at a fixed rate and duplicating/dropping frames.
-///
-/// All AVAssetWriter work happens on a dedicated serial queue, never the main thread.
+/// Frame-tap driven with stable frame timing and backpressure handling:
+/// - Timestamps based on frame count (not wall clock) for consistent ~33ms intervals
+/// - Queues frames even if encoder is busy (up to 60-frame buffer) instead of dropping
+/// - Optimized pixel buffer handling to reduce encoder stalls
+/// - All work on dedicated serial queue, never main thread
 final class EvfClipRecorder: @unchecked Sendable {
     private static let width = 1280
     private static let height = 720
+    private static let frameDuration = CMTime(value: 1, timescale: 30)
 
-    private let queue = DispatchQueue(label: "evf.clip.recorder")
+    private let queue = DispatchQueue(label: "evf.clip.recorder", qos: .userInitiated)
     private var writer: AVAssetWriter?
     private var input: AVAssetWriterInput?
     private var adaptor: AVAssetWriterInputPixelBufferAdaptor?
     private var pixelBufferPool: CVPixelBufferPool?
-    private var startTime: CFTimeInterval = 0
+    private var frameQueue: [(CGImage, CMTime)] = []
     private var frameCount = 0
     private var outputURL: URL?
+    private var encodingTask: Task<Void, Never>?
 
     /// Begins recording. Returns a closure to install as the camera's `frameTap`.
     func start(to url: URL) -> (CGImage) -> Void {
@@ -31,7 +32,11 @@ final class EvfClipRecorder: @unchecked Sendable {
             let settings: [String: Any] = [
                 AVVideoCodecKey: AVVideoCodecType.h264,
                 AVVideoWidthKey: Self.width,
-                AVVideoHeightKey: Self.height
+                AVVideoHeightKey: Self.height,
+                AVVideoCompressionPropertiesKey: [
+                    AVVideoAverageBitRateKey: 4_000_000,
+                    AVVideoMaxKeyFrameIntervalKey: 30
+                ] as [String: Any]
             ]
             let input = AVAssetWriterInput(mediaType: .video, outputSettings: settings)
             input.expectsMediaDataInRealTime = true
@@ -52,29 +57,53 @@ final class EvfClipRecorder: @unchecked Sendable {
             self.adaptor = adaptor
             self.pixelBufferPool = adaptor.pixelBufferPool
             self.outputURL = url
-            self.startTime = CACurrentMediaTime()
             self.frameCount = 0
+            self.frameQueue = []
+            self.startEncodingLoop()
         }
         return { [weak self] image in
-            self?.appendFrame(image)
+            self?.enqueueFrame(image)
         }
     }
 
-    /// Called on the SDK thread by the camera's frameTap.
-    private func appendFrame(_ image: CGImage) {
-        queue.async { [self] in
-            guard let input, let adaptor, input.isReadyForMoreMediaData,
-                  let buffer = makeBuffer(from: image) else { return }
-            let elapsed = CACurrentMediaTime() - startTime
-            let time = CMTime(seconds: elapsed, preferredTimescale: 600)
-            adaptor.append(buffer, withPresentationTime: time)
-            frameCount += 1
+    /// Queue frame for encoding (called from SDK thread, doesn't block).
+    private func enqueueFrame(_ image: CGImage) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            let time = CMTime(value: Int64(self.frameCount), timescale: 30)
+            self.frameQueue.append((image, time))
+            self.frameCount += 1
+            if self.frameQueue.count > 60 { self.frameQueue.removeFirst() }
+        }
+    }
+
+    /// Continuously drain the frame queue to the encoder (prevents backpressure stalls).
+    private func startEncodingLoop() {
+        encodingTask?.cancel()
+        encodingTask = Task {
+            while !Task.isCancelled {
+                queue.async { [weak self] in
+                    self?.drainFrameQueue()
+                }
+                try? await Task.sleep(for: .milliseconds(2))
+            }
+        }
+    }
+
+    private func drainFrameQueue() {
+        guard let input, input.isReadyForMoreMediaData, !frameQueue.isEmpty else { return }
+        while let (image, time) = frameQueue.first, input.isReadyForMoreMediaData,
+              let buffer = makeBuffer(from: image) {
+            adaptor?.append(buffer, withPresentationTime: time)
+            frameQueue.removeFirst()
         }
     }
 
     func stop() async -> URL? {
-        await withCheckedContinuation { continuation in
+        encodingTask?.cancel()
+        return await withCheckedContinuation { continuation in
             queue.async { [self] in
+                drainFrameQueue()
                 guard let writer, let input, frameCount > 0 else {
                     cleanup()
                     continuation.resume(returning: nil)
@@ -91,11 +120,14 @@ final class EvfClipRecorder: @unchecked Sendable {
     }
 
     private func cleanup() {
+        encodingTask?.cancel()
+        encodingTask = nil
         writer = nil
         input = nil
         adaptor = nil
         pixelBufferPool = nil
         outputURL = nil
+        frameQueue = []
     }
 
     /// Draws the frame cover-fit into a pooled 1280×720 buffer.

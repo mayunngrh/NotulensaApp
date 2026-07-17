@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 
 /// Split dashboard: event list on the left, read-only event overview on the right
 /// with Edit Event / Launch Event actions.
@@ -92,12 +93,13 @@ struct DashboardView: View {
             GoogleDriveSettingsView()
         }
         .sheet(item: $editingEvent) { event in
+            let screen = NSScreen.main?.visibleFrame.size ?? CGSize(width: 1440, height: 900)
             NavigationStack {
                 EventDetailView(event: event) {
                     editingEvent = nil
                 }
             }
-            .frame(minWidth: 700, minHeight: 600)
+            .frame(width: screen.width * 0.8, height: screen.height * 0.8)
         }
     }
 }

@@ -24,11 +24,25 @@ struct KioskView: View {
             // and the webcam stays warm as the automatic fallback.
             viewModel.canon.setEvfEnabled(true)
             await viewModel.camera.start()
+            // If Canon is already connected, turn off the webcam immediately.
+            if viewModel.canon.isConnected {
+                viewModel.camera.stop()
+            }
             setFullscreen(true)
         }
         .onDisappear {
             viewModel.canon.setEvfEnabled(false)
             viewModel.camera.stop()
+        }
+        .onChange(of: viewModel.canon.isConnected) { _ in
+            if viewModel.canon.isConnected {
+                viewModel.camera.stop()
+            } else {
+                Task {
+                    try? await Task.sleep(for: .milliseconds(500))
+                    await viewModel.camera.start()
+                }
+            }
         }
         .onExitCommand {
             exitKiosk()

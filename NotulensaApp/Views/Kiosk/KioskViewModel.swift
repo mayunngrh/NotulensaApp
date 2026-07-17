@@ -83,9 +83,10 @@ final class KioskViewModel: ObservableObject {
     }
 
     func startSession() {
-        // Make sure the DSLR is awake before the first countdown (resets its
-        // auto power-off timer; reconnects automatically if it already slept).
+        // Warm up both cameras before the first countdown: Canon resets its
+        // auto power-off timer, and webcam ensures the session is fully running.
         canon.wake()
+        camera.warm()
         shots = [:]
         clips = [:]
         currentOrder = 1
@@ -113,9 +114,10 @@ final class KioskViewModel: ObservableObject {
     // MARK: Capture
 
     func beginCountdown() {
-        // Nudge the DSLR awake before every countdown — a body that dozed between
-        // guests reconnects while the countdown runs instead of failing the shot.
+        // Warm up both cameras before every countdown: Canon reconnects if it dozed,
+        // and webcam ensures the session stays running.
         canon.wake()
+        camera.warm()
         reviewTask?.cancel()
         reviewShot = nil
         captureTask?.cancel()

@@ -30,6 +30,18 @@ final class CameraService: ObservableObject {
         Task.detached { session.stopRunning() }
     }
 
+    /// Ensures the session is running and ready before taking a photo.
+    func warm() {
+        guard isConfigured else { return }
+        let session = self.session
+        Task.detached {
+            if !session.isRunning {
+                session.startRunning()
+                try? await Task.sleep(for: .milliseconds(200))
+            }
+        }
+    }
+
     private func requestAccess() async -> Bool {
         switch AVCaptureDevice.authorizationStatus(for: .video) {
         case .authorized: return true

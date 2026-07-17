@@ -2,7 +2,13 @@
   "permissions": {
     "allow": [
       "Bash(xcodebuild -project NotulensaApp.xcodeproj -scheme NotulensaApp -destination 'platform=macOS' clean build)",
-      "Bash(xcodebuild -project NotulensaApp.xcodeproj -scheme NotulensaApp -destination 'platform=macOS' build)"
+      "Bash(xcodebuild -project NotulensaApp.xcodeproj -scheme NotulensaApp -destination 'platform=macOS' build)",
+      "Bash(python3 -c \"import PIL; print\\('PIL', PIL.__version__\\)\")",
+      "Bash(swift /tmp/makeicon.swift)",
+      "Bash(sips -g pixelWidth -g hasAlpha /tmp/icon_master.png)",
+      "Bash(sed -i '' 's/^import SwiftUI$/import SwiftUI\\\\nimport AppKit/' Views/Dashboard/DashboardView.swift)",
+      "Bash(security find-identity *)",
+      "Bash(xcrun notarytool *)"
     ]
   }
 }
