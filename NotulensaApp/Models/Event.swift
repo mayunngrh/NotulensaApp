@@ -27,6 +27,7 @@ final class Event: ObservableObject, Identifiable, Codable {
 
     // MARK: Live photo settings
     @Published var livePhotoLoops: Int
+    @Published var enablePreview: Bool
 
     @Published var templates: [PhotoTemplate]
     @Published var captures: [CompositedPhoto]
@@ -47,6 +48,7 @@ final class Event: ObservableObject, Identifiable, Codable {
         self.gifWidth = 720
         self.gifFrameSeconds = 0.8
         self.livePhotoLoops = 2
+        self.enablePreview = false
         self.templates = []
         self.captures = []
     }
@@ -69,7 +71,7 @@ final class Event: ObservableObject, Identifiable, Codable {
         case id, name, createdAt, idleMediaPath, welcomeBackgroundPath
         case startButtonRelX, startButtonRelY, galleryButtonRelX, galleryButtonRelY
         case cameraSource, countdown, countdownFirst, countdownOthers, reviewSeconds
-        case gifWidth, gifFrameSeconds, livePhotoLoops, templates, captures
+        case gifWidth, gifFrameSeconds, livePhotoLoops, enablePreview, templates, captures
     }
 
     init(from decoder: Decoder) throws {
@@ -89,6 +91,7 @@ final class Event: ObservableObject, Identifiable, Codable {
         gifWidth = (try? c.decode(Int.self, forKey: .gifWidth)) ?? 720
         gifFrameSeconds = (try? c.decode(Double.self, forKey: .gifFrameSeconds)) ?? 0.8
         livePhotoLoops = (try? c.decode(Int.self, forKey: .livePhotoLoops)) ?? 2
+        enablePreview = (try? c.decode(Bool.self, forKey: .enablePreview)) ?? false
         templates = (try? c.decode([PhotoTemplate].self, forKey: .templates)) ?? []
         captures = (try? c.decode([CompositedPhoto].self, forKey: .captures)) ?? []
     }
@@ -110,6 +113,7 @@ final class Event: ObservableObject, Identifiable, Codable {
         try c.encode(gifWidth, forKey: .gifWidth)
         try c.encode(gifFrameSeconds, forKey: .gifFrameSeconds)
         try c.encode(livePhotoLoops, forKey: .livePhotoLoops)
+        try c.encode(enablePreview, forKey: .enablePreview)
         try c.encode(templates, forKey: .templates)
         try c.encode(captures, forKey: .captures)
     }

@@ -6,9 +6,14 @@ import QuartzCore
 /// Frames arrive via CanonCameraService.evfFrameSink, so SwiftUI never re-renders
 /// per frame — Core Animation just swaps the layer contents (cheapest possible path).
 struct CanonEvfPreviewView: NSViewRepresentable {
+    /// `.resizeAspectFill` (default) fills + crops; `.resizeAspect` fits the whole frame
+    /// (letterboxed) — used by landscape preview to show fit-to-width on a portrait screen.
+    var contentsGravity: CALayerContentsGravity = .resizeAspectFill
+
     func makeNSView(context: Context) -> FrameView {
         let view = FrameView()
-        CanonCameraService.shared.evfFrameSink = { [weak view] frame in
+        view.layer?.contentsGravity = contentsGravity
+        CanonCameraService.shared.attachEvfSink(owner: view) { [weak view] frame in
             view?.show(frame)
         }
         if let current = CanonCameraService.shared.evfImage {
@@ -17,11 +22,13 @@ struct CanonEvfPreviewView: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ nsView: FrameView, context: Context) {}
+    func updateNSView(_ nsView: FrameView, context: Context) {
+        nsView.layer?.contentsGravity = contentsGravity
+    }
 
     static func dismantleNSView(_ nsView: FrameView, coordinator: ()) {
         MainActor.assumeIsolated {
-            CanonCameraService.shared.evfFrameSink = nil
+            CanonCameraService.shared.detachEvfSink(owner: nsView)
         }
     }
 

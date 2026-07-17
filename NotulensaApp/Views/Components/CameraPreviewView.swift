@@ -5,14 +5,20 @@ import AppKit
 /// Live camera preview, mirrored (selfie-style) to match the mirrored captures.
 struct CameraPreviewView: NSViewRepresentable {
     let session: AVCaptureSession
+    /// `.resizeAspectFill` (default) fills + crops the frame; `.resizeAspect` fits the
+    /// whole video inside the frame (letterboxed) — used by landscape preview so a wide
+    /// source shows fit-to-width and centered on a portrait screen.
+    var videoGravity: AVLayerVideoGravity = .resizeAspectFill
 
     func makeNSView(context: Context) -> PreviewNSView {
         let view = PreviewNSView()
+        view.previewLayer.videoGravity = videoGravity
         view.previewLayer.session = session
         return view
     }
 
     func updateNSView(_ nsView: PreviewNSView, context: Context) {
+        nsView.previewLayer.videoGravity = videoGravity
         if nsView.previewLayer.session !== session {
             nsView.previewLayer.session = session
         }

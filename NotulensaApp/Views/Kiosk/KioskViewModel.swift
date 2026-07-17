@@ -63,6 +63,7 @@ final class KioskViewModel: ObservableObject {
     }
 
     @Published var state: State = .pickCamera
+    @Published var isInPreviewMode = false
     var template: PhotoTemplate?
     /// Captured JPEGs keyed by 1-based slot order.
     var shots: [Int: Data] = [:]
@@ -188,19 +189,25 @@ final class KioskViewModel: ObservableObject {
         // Wake/warm only the chosen camera and shut the others off — otherwise the webcam
         // (or the other DSLR's EVF) keeps streaming in the background and can bleed into
         // the preview.
+        // Also stop the other cameras' background auto-detect polling so only the locked-in
+        // camera's SDK stays active for the rest of the launch (one launch = one camera).
         switch which {
         case .canon:
             canon.wake()
             sony.setEvfEnabled(false)
+            sony.stopMonitoring()
             camera.stop()
         case .sony:
             sony.wake()
             canon.setEvfEnabled(false)
+            canon.stopMonitoring()
             camera.stop()
         case .webcam:
             camera.warm()
             canon.setEvfEnabled(false)
+            canon.stopMonitoring()
             sony.setEvfEnabled(false)
+            sony.stopMonitoring()
         }
         // Warm up the clip recorder encoder to avoid initialization stall during first countdown.
         evfClipRecorder.warmup()
@@ -213,6 +220,90 @@ final class KioskViewModel: ObservableObject {
         state = .capturing
         beginCountdown()
     }
+
+    func startPreview() {
+        isInPreviewMode = true
+        shots.removeAll()
+        clips.removeAll()
+        // Matches startSession()'s numbering exactly — currentOrder is "the slot currently
+        // being captured", 1-based, same as real capture. Preview reuses beginCountdown()/
+        // retake()/next() below verbatim so it can never drift out of sync with
+        // template.shotCount the way the old separate preview implementation did (that one
+        // double-incremented currentOrder — once in previewNext(), again in its own capture
+        // completion handler — which skipped slots and was the root cause of both the
+        // "wrong slot" numbering and the freeze that showed up around the 3rd shot).
+        currentOrder = 1
+        reviewShot = nil
+        countdown = nil
+        errorMessage = nil
+
+        // Use first template for preview
+        guard let firstTemplate = event.templates.first else {
+            errorMessage = "No templates available for preview."
+            return
+        }
+
+        // No camera lock needed for preview — it's just a demo flow. Pick whichever
+        // camera is actually connected: a connected DSLR means the webcam session was
+        // already stopped (see KioskView.task), so blindly defaulting to .webcam here
+        // would show a frozen/black feed. Fall back to webcam only when no DSLR is present.
+        if lockedCamera == nil {
+            if canon.isConnected {
+                lockedCamera = .canon
+            } else if sony.isConnected {
+                lockedCamera = .sony
+            } else {
+                lockedCamera = .webcam
+            }
+        }
+        NSLog("[Preview] startPreview() — lockedCamera=\(String(describing: lockedCamera)), canon.isConnected=\(canon.isConnected), canon.evfReady=\(canon.evfReady), sony.isConnected=\(sony.isConnected)")
+        // Make sure the chosen camera's live feed is actually running for the preview.
+        switch lockedCamera {
+        case .canon: canon.setEvfEnabled(true); canon.wake()
+        case .sony: sony.setEvfEnabled(true); sony.wake()
+        case .webcam, nil: camera.warm()
+        }
+
+        template = firstTemplate
+        state = .capturing
+        // Wait for the camera's live feed to be ready before starting countdown —
+        // gives the EVF frames time to warm up so the live photo capture has good initial frames.
+        waitForCameraReady()
+    }
+
+    /// In preview mode: waits for the camera's live feed to be ready before starting
+    /// the first countdown. Polls every 100ms until evfReady flips true.
+    private func waitForCameraReady() {
+        captureTask?.cancel()
+        captureTask = Task { [weak self] in
+            guard let self else { return }
+            let startTime = Date()
+            while !Task.isCancelled {
+                let isReady: Bool
+                switch lockedCamera {
+                case .canon: isReady = canon.evfReady
+                case .sony: isReady = sony.evfReady
+                case .webcam, nil: isReady = camera.isConnected
+                }
+
+                if isReady {
+                    NSLog("[Preview] Camera ready, starting countdown")
+                    beginCountdown()
+                    return
+                }
+
+                // Timeout after 10 seconds to avoid infinite wait
+                if Date().timeIntervalSince(startTime) > 10 {
+                    NSLog("[Preview] Camera ready timeout, starting anyway")
+                    beginCountdown()
+                    return
+                }
+
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+        }
+    }
+
 
     // MARK: Capture
 
@@ -249,6 +340,7 @@ final class KioskViewModel: ObservableObject {
             // long frozen tail while the DSLR transfers the file (3–10s on the 600D).
             let recorded = await stopClip()
             do {
+                NSLog(isInPreviewMode ? "[Preview] Taking photo \(currentOrder) of \(template?.shotCount ?? 0)" : "Taking photo \(currentOrder)")
                 let data = try await takePhoto()
                 shots[currentOrder] = data
                 if let recorded {
@@ -257,6 +349,7 @@ final class KioskViewModel: ObservableObject {
                 reviewShot = data
                 scheduleAutoAdvance()
             } catch {
+                NSLog(isInPreviewMode ? "[Preview] Capture failed: \(error.localizedDescription)" : "Capture failed: \(error.localizedDescription)")
                 errorMessage = "Capture failed: \(error.localizedDescription)"
             }
         }
@@ -302,6 +395,9 @@ final class KioskViewModel: ObservableObject {
     }
 
     private func scheduleAutoAdvance() {
+        // Preview mode waits for explicit Retake/Next taps — no auto-advance timer.
+        // Real sessions auto-advance after the review display period.
+        guard !isInPreviewMode else { return }
         reviewTask?.cancel()
         reviewTask = Task { [weak self] in
             guard let self else { return }
@@ -325,6 +421,9 @@ final class KioskViewModel: ObservableObject {
             currentOrder += 1
             beginCountdown()
         } else {
+            // All slots filled — finish whether preview or real session. Preview goes to
+            // the result page like a real session (user taps a button to return, no auto-timer).
+            NSLog(isInPreviewMode ? "[Preview] All \(template.shotCount) preview photos taken, showing result" : "All \(template.shotCount) photos taken, finishing session")
             Task { await finishSession() }
         }
     }
@@ -393,7 +492,10 @@ final class KioskViewModel: ObservableObject {
             slideshowURL: slideshowPath.map { MediaStore.url(for: $0) },
             livePhotoURL: livePhotoPath.map { MediaStore.url(for: $0) }
         ))
-        startUpload(printablePath: printablePath, livePhotoPath: livePhotoPath, slideshowPath: slideshowPath, rawPaths: rawPaths)
+        // Preview mode skips Drive upload — it's just a test flow, results don't need saving.
+        if !isInPreviewMode {
+            startUpload(printablePath: printablePath, livePhotoPath: livePhotoPath, slideshowPath: slideshowPath, rawPaths: rawPaths)
+        }
     }
 
     // MARK: Drive upload — folder created at session start (QR valid immediately),
@@ -408,24 +510,37 @@ final class KioskViewModel: ObservableObject {
         driveFolderTask?.cancel()
         driveFolderTask = nil
         guard auth.isSignedIn else {
+            NSLog("[Drive] prepareDriveFolder: not signed in, skipping")
             uploadState = .notSignedIn
             return
         }
         let eventName = event.name
+        NSLog("[Drive] prepareDriveFolder: starting for event '\(eventName)'")
         driveFolderTask = Task { [weak self] in
-            let token = try await auth.validAccessToken()
-            let drive = DriveUploader(accessToken: token)
-            let rootID = try await drive.ensureFolder(name: auth.masterFolderName, parentID: nil)
-            let eventFolderID = try await drive.ensureFolder(name: eventName, parentID: rootID)
-            let sessionName = Date.now.formatted(.dateTime.year().month().day().hour().minute().second())
-                .replacingOccurrences(of: "/", with: "-")
-            let sessionID = try await drive.createFolder(name: "Session \(sessionName)", parentID: eventFolderID)
-            try await drive.makePublic(fileID: sessionID)
+            do {
+                let token = try await auth.validAccessToken()
+                NSLog("[Drive] Got access token")
+                let drive = DriveUploader(accessToken: token)
+                let rootID = try await drive.ensureFolder(name: auth.masterFolderName, parentID: nil)
+                NSLog("[Drive] Root folder ID: \(rootID)")
+                let eventFolderID = try await drive.ensureFolder(name: eventName, parentID: rootID)
+                NSLog("[Drive] Event folder ID: \(eventFolderID)")
+                let sessionName = Date.now.formatted(.dateTime.year().month().day().hour().minute().second())
+                    .replacingOccurrences(of: "/", with: "-")
+                let sessionID = try await drive.createFolder(name: "Session \(sessionName)", parentID: eventFolderID)
+                NSLog("[Drive] Session folder created: \(sessionID)")
+                try await drive.makePublic(fileID: sessionID)
+                NSLog("[Drive] Session folder made public")
 
-            let link = DriveUploader.folderLink(id: sessionID)
-            self?.driveLink = link
-            self?.pendingDriveURL = link.absoluteString
-            return sessionID
+                let link = DriveUploader.folderLink(id: sessionID)
+                NSLog("[Drive] QR link ready: \(link.absoluteString)")
+                self?.driveLink = link
+                self?.pendingDriveURL = link.absoluteString
+                return sessionID
+            } catch {
+                NSLog("[Drive] prepareDriveFolder failed: \(error.localizedDescription)")
+                throw error
+            }
         }
     }
 
@@ -441,14 +556,17 @@ final class KioskViewModel: ObservableObject {
         lastUploadArgs = (printablePath, livePhotoPath, slideshowPath, rawPaths)
         let auth = GoogleAuthService.shared
         guard auth.isSignedIn, let folderTask = driveFolderTask else {
+            NSLog("[Drive] startUpload: not signed in or no folder task")
             uploadState = .notSignedIn
             return
         }
+        NSLog("[Drive] startUpload: starting (printable, slideshow=\(slideshowPath != nil), livePhoto=\(livePhotoPath != nil), raw=\(rawPaths.count))")
         uploadState = .uploading
         uploadTask?.cancel()
         uploadTask = Task { [weak self] in
             do {
                 let sessionID = try await folderTask.value
+                NSLog("[Drive] Got session ID: \(sessionID)")
                 let token = try await auth.validAccessToken()
                 let drive = DriveUploader(accessToken: token)
 
@@ -458,12 +576,18 @@ final class KioskViewModel: ObservableObject {
                 for (index, raw) in rawPaths.enumerated() {
                     files.append((raw, "photo-\(index + 1).jpg", "image/jpeg"))
                 }
+                NSLog("[Drive] Uploading \(files.count) files...")
                 for (relPath, name, mime) in files {
+                    NSLog("[Drive] Uploading: \(name)")
                     try await drive.upload(fileURL: MediaStore.url(for: relPath), as: name, mimeType: mime, parentID: sessionID)
+                    NSLog("[Drive] ✓ Uploaded: \(name)")
                 }
-                self?.uploadState = .done(DriveUploader.folderLink(id: sessionID))
+                let finalLink = DriveUploader.folderLink(id: sessionID)
+                NSLog("[Drive] Upload complete: \(finalLink.absoluteString)")
+                self?.uploadState = .done(finalLink)
             } catch {
                 if !Task.isCancelled {
+                    NSLog("[Drive] Upload failed: \(error.localizedDescription)")
                     self?.uploadState = .failed(error.localizedDescription)
                 }
             }
@@ -478,6 +602,7 @@ final class KioskViewModel: ObservableObject {
     func backToWelcome() {
         captureTask?.cancel()
         reviewTask?.cancel()
+        isInPreviewMode = false
         countdown = nil
         reviewShot = nil
         template = nil
@@ -489,6 +614,7 @@ final class KioskViewModel: ObservableObject {
     func backToIdle() {
         captureTask?.cancel()
         reviewTask?.cancel()
+        isInPreviewMode = false
         countdown = nil
         reviewShot = nil
         template = nil

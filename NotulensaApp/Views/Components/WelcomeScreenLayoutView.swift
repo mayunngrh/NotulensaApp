@@ -9,9 +9,11 @@ struct WelcomeScreenLayoutView: View {
     var isEditable: Bool = false
     var onStart: (() -> Void)?
     var onGallery: (() -> Void)?
+    var onPreview: (() -> Void)?
 
     @State private var dragStartStart: CGPoint?
     @State private var dragStartGallery: CGPoint?
+    @State private var dragStartPreview: CGPoint?
 
     var body: some View {
         GeometryReader { geo in
@@ -45,6 +47,19 @@ struct WelcomeScreenLayoutView: View {
                         get: { event.galleryButtonRelY }, set: { event.galleryButtonRelY = $0 }
                     ), geo: geo, start: $dragStartGallery)
                 )
+
+                if onPreview != nil {
+                    Button(action: { onPreview?() }) {
+                        Label("Preview", systemImage: "play.circle.fill")
+                            .font(.title3.bold())
+                            .padding(.horizontal, 22)
+                            .padding(.vertical, 14)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .tint(.cyan)
+                    .position(x: 0.5 * geo.size.width, y: 0.3 * geo.size.height)
+                }
             }
         }
     }

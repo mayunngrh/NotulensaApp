@@ -89,8 +89,17 @@ public:
         // Enumerate cameras with 5 second timeout
         ICrEnumCameraObjectInfo* enumInfo = nullptr;
         CrError ret = EnumCameraObjects(&enumInfo, 5);
-        if (ret != CrError_None || !enumInfo) {
+        if (ret == CrError_None && !enumInfo) {
+            // Enumeration succeeded but no Sony camera is attached — the normal case when a
+            // Canon (or nothing) is connected. This is polled every 2s, so stay silent to
+            // avoid flooding the log with a bogus "failed" for an expected empty result.
+            return false;
+        }
+        if (ret != CrError_None) {
             NSLog(@"[Sony SDK] EnumCameraObjects failed: 0x%04x", ret);
+            return false;
+        }
+        if (!enumInfo) {
             return false;
         }
 

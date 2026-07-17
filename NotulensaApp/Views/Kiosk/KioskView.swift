@@ -35,6 +35,10 @@ struct KioskView: View {
             viewModel.canon.setEvfEnabled(false)
             viewModel.sony.setEvfEnabled(false)
             viewModel.camera.stop()
+            // Resume both cameras' auto-detect polling — selectCamera() stops the
+            // non-locked ones for the launch, so restart them for the next event.
+            viewModel.canon.startMonitoring()
+            viewModel.sony.startMonitoring()
         }
         .onChange(of: viewModel.canon.isConnected) { _ in
             // Once a camera is locked in for this kiosk launch, leave it alone — don't
@@ -81,6 +85,8 @@ struct KioskView: View {
                 vm.startSession()
             } onGallery: {
                 vm.showGallery()
+            } onPreview: {
+                vm.startPreview()
             } onClose: {
                 if !vm.shots.isEmpty {
                     vm.reviewShot = vm.shots[vm.currentOrder]
@@ -111,13 +117,13 @@ struct KioskView: View {
             } onSelectWebcam: {
                 vm.selectCamera(.webcam)
             } onCancel: {
-                vm.backToWelcome()
+                exitKiosk()
             }
         case .pickTemplate:
             TemplatePickerView(event: event) { template in
                 vm.pick(template)
             } onCancel: {
-                vm.backToWelcome()
+                exitKiosk()
             }
         case .capturing:
             CaptureView(viewModel: vm)
@@ -132,7 +138,8 @@ struct KioskView: View {
     }
 
     private func persistResult(_ vm: KioskViewModel) {
-        guard let relPath = vm.pendingResultPath else { return }
+        // Preview mode doesn't save results to the event gallery — it's just a test flow.
+        guard !vm.isInPreviewMode, let relPath = vm.pendingResultPath else { return }
         vm.pendingResultPath = nil
         let photo = CompositedPhoto(filePath: relPath, livePhotoPath: vm.pendingLivePhotoPath, slideshowPath: vm.pendingSlideshowPath)
         photo.rawPhotoPaths = vm.pendingRawPaths

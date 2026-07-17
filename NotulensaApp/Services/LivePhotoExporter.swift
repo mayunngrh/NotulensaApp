@@ -47,7 +47,7 @@ enum LivePhotoExporter {
         // Always extract at 30fps for consistent output timing
         let frameCount = max(1, Int(clipDuration * Double(fps)))
 
-        let scale = min(1.0, 360.0 / max(template.canvasWidth, template.canvasHeight))
+        let scale = min(1.0, 1080.0 / max(template.canvasWidth, template.canvasHeight))
         let outW = Int(template.canvasWidth * scale)
         let outH = Int(template.canvasHeight * scale)
 
@@ -63,7 +63,7 @@ enum LivePhotoExporter {
             AVVideoWidthKey: outW,
             AVVideoHeightKey: outH,
             AVVideoCompressionPropertiesKey: [
-                AVVideoAverageBitRateKey: 1_500_000,
+                AVVideoAverageBitRateKey: 5_000_000,
                 AVVideoMaxKeyFrameIntervalKey: 30,
                 AVVideoExpectedSourceFrameRateKey: NSNumber(value: fps)
             ] as [String: Any]

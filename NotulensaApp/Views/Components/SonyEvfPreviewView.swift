@@ -6,9 +6,14 @@ import QuartzCore
 /// Frames arrive via SonyCameraService.evfFrameSink, so SwiftUI never re-renders
 /// per frame — Core Animation just swaps the layer contents (cheapest possible path).
 struct SonyEvfPreviewView: NSViewRepresentable {
+    /// `.resizeAspectFill` (default) fills + crops; `.resizeAspect` fits the whole frame
+    /// (letterboxed) — used by landscape preview to show fit-to-width on a portrait screen.
+    var contentsGravity: CALayerContentsGravity = .resizeAspectFill
+
     func makeNSView(context: Context) -> FrameView {
         let view = FrameView()
-        SonyCameraService.shared.evfFrameSink = { [weak view] frame in
+        view.layer?.contentsGravity = contentsGravity
+        SonyCameraService.shared.attachEvfSink(owner: view) { [weak view] frame in
             view?.show(frame)
         }
         if let current = SonyCameraService.shared.evfImage {
@@ -17,11 +22,13 @@ struct SonyEvfPreviewView: NSViewRepresentable {
         return view
     }
 
-    func updateNSView(_ nsView: FrameView, context: Context) {}
+    func updateNSView(_ nsView: FrameView, context: Context) {
+        nsView.layer?.contentsGravity = contentsGravity
+    }
 
     static func dismantleNSView(_ nsView: FrameView, coordinator: ()) {
         MainActor.assumeIsolated {
-            SonyCameraService.shared.evfFrameSink = nil
+            SonyCameraService.shared.detachEvfSink(owner: nsView)
         }
     }
 

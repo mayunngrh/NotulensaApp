@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import AVFoundation
 
 /// Kiosk welcome screen: background photo + Start Photo Session + Gallery buttons,
 /// positioned exactly as configured in the event setup wizard.
@@ -8,11 +9,22 @@ struct WelcomeView: View {
     let viewModel: KioskViewModel
     let onStart: () -> Void
     let onGallery: () -> Void
+    let onPreview: () -> Void
     let onClose: () -> Void
 
     var body: some View {
+        if event.enablePreview {
+            // Preview mode: show landscape camera feed instead of welcome background
+            previewModeWelcome
+        } else {
+            // Normal mode: show welcome background with buttons
+            normalWelcome
+        }
+    }
+
+    private var normalWelcome: some View {
         ZStack {
-            WelcomeScreenLayoutView(event: event, isEditable: false, onStart: onStart, onGallery: onGallery)
+            WelcomeScreenLayoutView(event: event, isEditable: false, onStart: onStart, onGallery: onGallery, onPreview: event.enablePreview ? onPreview : nil)
                 .ignoresSafeArea()
 
             if !viewModel.shots.isEmpty {
@@ -64,5 +76,83 @@ struct WelcomeView: View {
                 .background(.black.opacity(0.5))
             }
         }
+    }
+
+    private var previewModeWelcome: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+
+            VStack {
+                Spacer()
+
+                HStack {
+                    Spacer()
+
+                    // Landscape camera preview (16:9 aspect ratio, centered).
+                    // "fit" gravity ensures the wide source is never cropped/zoomed.
+                    ZStack {
+                        if viewModel.usesCanon {
+                            if viewModel.canon.isConnected && viewModel.canon.evfReady {
+                                CanonEvfPreviewView(contentsGravity: .resizeAspect)
+                            } else {
+                                previewPlaceholder(viewModel.canon.errorMessage ?? "Connecting to Canon camera…")
+                            }
+                        } else if viewModel.usesSony {
+                            if viewModel.sony.isConnected && viewModel.sony.evfReady {
+                                SonyEvfPreviewView(contentsGravity: .resizeAspect)
+                            } else {
+                                previewPlaceholder(viewModel.sony.errorMessage ?? "Connecting to Sony camera…")
+                            }
+                        } else {
+                            CameraPreviewView(session: viewModel.camera.session, videoGravity: .resizeAspect)
+                        }
+                    }
+                    .aspectRatio(16 / 9, contentMode: .fit)
+                    .cornerRadius(12)
+                    .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+
+                    Spacer()
+                }
+                .padding(.horizontal, 40)
+
+                Spacer()
+
+                // Preview button in the center — same pink tint + camera icon as the
+                // normal (non-preview) "Start Photo Session" button, for visual parity.
+                Button(action: onPreview) {
+                    Label("Take Photo", systemImage: "camera.fill")
+                        .font(.title2.bold())
+                        .padding(.horizontal, 40)
+                        .padding(.vertical, 16)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .tint(.pink)
+
+                Spacer()
+
+                // Bottom info
+                VStack(spacing: 8) {
+                    Text("Preview Mode Enabled")
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                    Text("Tap to start a live preview session")
+                        .font(.caption)
+                        .foregroundStyle(.gray)
+                }
+                .padding(.vertical, 16)
+            }
+        }
+    }
+
+    private func previewPlaceholder(_ message: String) -> some View {
+        VStack(spacing: 16) {
+            ProgressView().controlSize(.large).tint(.white)
+            Text(message)
+                .font(.title3)
+                .foregroundStyle(.white.opacity(0.8))
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(.black)
     }
 }

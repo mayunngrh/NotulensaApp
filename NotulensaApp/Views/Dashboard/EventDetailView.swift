@@ -81,6 +81,14 @@ struct EventDetailView: View {
                 Text("Countdown timing, photo review duration, GIF size, and live photo looping.")
             }
 
+            Section {
+                Toggle("Enable Preview Mode", isOn: $event.enablePreview)
+            } header: {
+                Text("Preview Mode")
+            } footer: {
+                Text("When enabled, a Preview button appears on the welcome screen showing a landscape camera feed. Taps clear all shots and start fresh.")
+            }
+
             if !event.canStart {
                 Section {
                     Label(

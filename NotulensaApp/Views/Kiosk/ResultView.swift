@@ -70,25 +70,24 @@ struct ResultView: View {
                 .padding(.bottom, 16)
 
                 // Main content: large photo with icon overlay
-                ZStack(alignment: .topTrailing) {
+                ZStack(alignment: .trailing) {
                     preview
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                         .padding(20)
 
-                    // Vertical icon overlay on right side
-                    VStack(spacing: 16) {
-                        iconButton(icon: "square.and.arrow.up", size: 28) {
+                    // Middle-right vertical action stack.
+                    VStack(spacing: 24) {
+                        iconButton(icon: "square.and.arrow.up", size: 34) {
                             ShareService.airDrop(fileURL: activeURL)
                         }
-                        iconButton(icon: "printer.fill", size: 28) {
+                        iconButton(icon: "printer.fill", size: 34) {
                             ShareService.print(fileURL: result.printableURL)
                         }
-                        iconButton(icon: "qrcode", size: 28) {
+                        iconButton(icon: "qrcode", size: 34) {
                             showQR = true
                         }
                     }
-                    .padding(.top, 30)
                     .padding(.trailing, 24)
                 }
 
@@ -128,7 +127,7 @@ struct ResultView: View {
             Image(systemName: icon)
                 .font(.system(size: size))
                 .foregroundStyle(.white)
-                .frame(width: 56, height: 56)
+                .frame(width: 72, height: 72)
                 .background(Color.pink.opacity(0.8))
                 .clipShape(Circle())
         }

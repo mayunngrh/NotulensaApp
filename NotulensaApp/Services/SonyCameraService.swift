@@ -23,7 +23,26 @@ final class SonyCameraService: ObservableObject {
     /// True once live view frames are flowing.
     @Published private(set) var evfReady = false
     /// Direct per-frame sink for the preview layer.
-    var evfFrameSink: ((CGImage) -> Void)?
+    /// Only one preview view can be "live" at a time — see attachEvfSink/detachEvfSink.
+    private(set) var evfFrameSink: ((CGImage) -> Void)?
+    /// Identifies whichever NSView currently owns evfFrameSink, so a stale view
+    /// tearing down can't clobber a different view that has since taken over
+    /// (same race that froze the Canon preview — see CanonCameraService).
+    private weak var evfSinkOwner: AnyObject?
+
+    /// Claims the frame sink for `owner`. Call from makeNSView.
+    func attachEvfSink(owner: AnyObject, _ sink: @escaping (CGImage) -> Void) {
+        evfSinkOwner = owner
+        evfFrameSink = sink
+    }
+
+    /// Releases the frame sink, but only if `owner` is still the current owner.
+    /// Call from dismantleNSView.
+    func detachEvfSink(owner: AnyObject) {
+        guard evfSinkOwner === owner else { return }
+        evfFrameSink = nil
+        evfSinkOwner = nil
+    }
     /// Per-frame tap invoked on the SDK thread (used by the clip recorder).
     nonisolated(unsafe) var frameTap: ((CGImage) -> Void)?
     @Published private(set) var isConnected = false
@@ -64,6 +83,16 @@ final class SonyCameraService: ObservableObject {
             startEventPump()
             startDetectLoop()
             startEvfLoop()
+        }
+    }
+
+    /// Stops the 2-second auto-detect polling — used once another camera (e.g. Canon)
+    /// is locked in for the launch, so the SDK stops enumerating in the background.
+    /// Call startMonitoring() again to resume detection for the next launch.
+    func stopMonitoring() {
+        sonyQueue.async { [self] in
+            detectLoop?.cancel()
+            detectLoop = nil
         }
     }
 
