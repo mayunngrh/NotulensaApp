@@ -494,11 +494,11 @@ final class KioskViewModel: ObservableObject {
 
         for clip in clipsSnapshot.values { try? FileManager.default.removeItem(at: clip) }
 
-        // Keep the raw shots as part of the session (locally + for the Drive upload).
+        // Keep the raw shots as part of the session (locally in Desktop/Photobooth/EventName/Session/ + for Drive upload).
         let stamp = Int(Date.now.timeIntervalSince1970)
         var rawPaths: [String] = []
         for (order, data) in shotsSnapshot.sorted(by: { $0.key < $1.key }) {
-            if let path = try? MediaStore.write(data, into: .sessions, subfolder: eventID, fileName: "raw-\(stamp)-\(order).jpg") {
+            if let path = try? MediaStore.writeToSession(data, fileName: "raw-\(stamp)-\(order).jpg") {
                 rawPaths.append(path)
             }
         }
@@ -547,6 +547,9 @@ final class KioskViewModel: ObservableObject {
                 NSLog("[Drive] Event folder ID: \(eventFolderID)")
                 let sessionName = Date.now.formatted(.dateTime.year().month().day().hour().minute().second())
                     .replacingOccurrences(of: "/", with: "-")
+                // Set local session context (Desktop/Photobooth/EventName/Session YYYY-MM-DD-HH-MM-SS/)
+                MediaStore.currentEventName = eventName
+                MediaStore.currentSessionName = sessionName
                 let sessionID = try await drive.createFolder(name: "Session \(sessionName)", parentID: eventFolderID)
                 NSLog("[Drive] Session folder created: \(sessionID)")
                 try await drive.makePublic(fileID: sessionID)

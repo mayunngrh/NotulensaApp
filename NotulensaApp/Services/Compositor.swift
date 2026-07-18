@@ -23,8 +23,8 @@ enum Compositor {
         guard let jpeg = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.92]) else {
             throw CompositorError.exportFailed
         }
-        let fileName = "result-\(Int(Date.now.timeIntervalSince1970)).jpg"
-        return try MediaStore.write(jpeg, into: .sessions, subfolder: eventID, fileName: fileName)
+        // Save to local session directory (Desktop/Photobooth/EventName/Session YYYY-MM-DD-HH-MM-SS/)
+        return try MediaStore.writeToSession(jpeg, fileName: "printable.jpg")
     }
 
     /// Renders one composited frame at `canvas * scale` pixels. Used for the printable

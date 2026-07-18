@@ -15,10 +15,8 @@ enum SlideshowExporter {
         let rawH = Int(Double(outW) * Double(first.height) / Double(first.width))
         let outH = rawH - (rawH % 2)
 
-        let fileName = "slideshow-\(Int(Date.now.timeIntervalSince1970)).mp4"
-        let dir = MediaStore.directory(.sessions).appendingPathComponent(eventID, isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let url = dir.appendingPathComponent(fileName)
+        let fileName = "slideshow.mp4"
+        let url = MediaStore.sessionDirectory().appendingPathComponent(fileName)
         try? FileManager.default.removeItem(at: url)
 
         let writer = try AVAssetWriter(outputURL: url, fileType: .mp4)
@@ -64,7 +62,7 @@ enum SlideshowExporter {
 
         input.markAsFinished()
         await writer.finishWriting()
-        return "\(MediaStore.Folder.sessions.rawValue)/\(eventID)/\(fileName)"
+        return "\(MediaStore.currentEventName)/Session \(MediaStore.currentSessionName)/\(fileName)"
     }
 
     private static func pixelBuffer(from image: CGImage, width: Int, height: Int) -> CVPixelBuffer? {

@@ -58,10 +58,8 @@ enum LivePhotoExporter {
         let outW = Int(template.canvasWidth * scale)
         let outH = Int(template.canvasHeight * scale)
 
-        let fileName = "live-\(Int(Date.now.timeIntervalSince1970)).mp4"
-        let dir = MediaStore.directory(.sessions).appendingPathComponent(eventID, isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let outputURL = dir.appendingPathComponent(fileName)
+        let fileName = "livephoto.mp4"
+        let outputURL = MediaStore.sessionDirectory().appendingPathComponent(fileName)
         try? FileManager.default.removeItem(at: outputURL)
 
         let writer = try AVAssetWriter(outputURL: outputURL, fileType: .mp4)
@@ -115,7 +113,7 @@ enum LivePhotoExporter {
 
         input.markAsFinished()
         await writer.finishWriting()
-        return "\(MediaStore.Folder.sessions.rawValue)/\(eventID)/\(fileName)"
+        return "\(MediaStore.currentEventName)/Session \(MediaStore.currentSessionName)/\(fileName)"
     }
 
     private static func renderFrame(template: TemplateSnapshot, images: [Int: CGImage], frame: CGImage?, scale: Double, outW: Int, outH: Int) -> CGImage? {

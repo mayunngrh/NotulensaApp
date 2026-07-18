@@ -21,9 +21,6 @@ struct CaptureView: View {
         // a visible fade-in every shot, which was also degrading the live photo look.
         ZStack {
             liveView
-            if let review = viewModel.reviewShot, let image = NSImage(data: review) {
-                reviewView(image)
-            }
         }
         .overlay(alignment: .topLeading) {
             // Back button to exit capture
@@ -125,6 +122,13 @@ struct CaptureView: View {
                 .padding(.vertical, 16)
                 .background(.black.opacity(0.6))
                 .padding(.bottom, 40)
+            }
+        }
+        // Review screen overlay — rendered on top of all other overlays so buttons are always tappable
+        .overlay {
+            if let review = viewModel.reviewShot, let image = NSImage(data: review) {
+                reviewView(image)
+                    .zIndex(100)
             }
         }
         .alert("Something went wrong", isPresented: .constant(viewModel.errorMessage != nil)) {
