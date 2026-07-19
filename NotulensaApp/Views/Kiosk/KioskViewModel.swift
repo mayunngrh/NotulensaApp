@@ -263,6 +263,17 @@ final class KioskViewModel: ObservableObject {
         isInPreviewMode = true
         shots.removeAll()
         clips.removeAll()
+        // Preview also runs through finishSession() below (ResultView needs real files on
+        // disk to display), but it never went through startSession(), so it was reusing
+        // whatever sessionEventName/sessionFolderName happened to be left over from the
+        // last real session — every preview run kept dumping files into that one stale
+        // folder instead of getting its own. Give each preview run a fresh, clearly
+        // labeled folder so it never collides with a real session or a previous preview.
+        let trimmedName = event.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        sessionEventName = trimmedName.isEmpty ? "Untitled Event" : trimmedName
+        sessionFolderName = "Preview " + Date.now.formatted(.dateTime.year().month().day().hour().minute().second())
+            .replacingOccurrences(of: "/", with: "-")
+        ensureLocalSessionContext()
         // Matches startSession()'s numbering exactly — currentOrder is "the slot currently
         // being captured", 1-based, same as real capture. Preview reuses beginCountdown()/
         // retake()/next() below verbatim so it can never drift out of sync with
