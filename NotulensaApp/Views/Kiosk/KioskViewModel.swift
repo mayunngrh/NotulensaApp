@@ -62,6 +62,21 @@ final class KioskViewModel: ObservableObject {
         }
     }
 
+    /// The event name and session timestamp for the CURRENT capture session, fixed once
+    /// per startSession() call and held on this instance — not just written into
+    /// MediaStore's shared static vars. Any code between here and the final write
+    /// (camera reselection, preview mode, Drive sign-in, another view model) could
+    /// otherwise stomp on those shared statics and silently redirect saves into a
+    /// blank "Session " folder. Re-asserting from these instance fields immediately
+    /// before every local write (ensureLocalSessionContext()) makes that impossible.
+    private var sessionEventName = ""
+    private var sessionFolderName = ""
+
+    private func ensureLocalSessionContext() {
+        MediaStore.currentEventName = sessionEventName
+        MediaStore.currentSessionName = sessionFolderName
+    }
+
     @Published var state: State = .pickCamera
     @Published var isInPreviewMode = false
     var template: PhotoTemplate?
@@ -177,6 +192,14 @@ final class KioskViewModel: ObservableObject {
         uploadState = .idle
         driveLink = nil
         pendingDriveURL = nil
+        // Local save must not depend on Google Drive sign-in state. Fixed once per
+        // session on this instance (see ensureLocalSessionContext) so nothing later
+        // in the flow can blank it out before the final write.
+        let trimmedName = event.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        sessionEventName = trimmedName.isEmpty ? "Untitled Event" : trimmedName
+        sessionFolderName = Date.now.formatted(.dateTime.year().month().day().hour().minute().second())
+            .replacingOccurrences(of: "/", with: "-")
+        ensureLocalSessionContext()
         prepareDriveFolder()
         // If camera already locked from initial launch, proceed to template/capture.
         // Otherwise, show camera picker first.
@@ -452,6 +475,9 @@ final class KioskViewModel: ObservableObject {
 
     private func finishSession() async {
         guard let template else { return }
+        // Re-assert right before the actual writes below — see ensureLocalSessionContext
+        // for why this can't just rely on startSession() having set it once, earlier.
+        ensureLocalSessionContext()
         state = .processing
         let eventID = event.id.uuidString
         let shotsSnapshot = shots
@@ -545,11 +571,9 @@ final class KioskViewModel: ObservableObject {
                 NSLog("[Drive] Root folder ID: \(rootID)")
                 let eventFolderID = try await drive.ensureFolder(name: eventName, parentID: rootID)
                 NSLog("[Drive] Event folder ID: \(eventFolderID)")
-                let sessionName = Date.now.formatted(.dateTime.year().month().day().hour().minute().second())
-                    .replacingOccurrences(of: "/", with: "-")
-                // Set local session context (Desktop/Photobooth/EventName/Session YYYY-MM-DD-HH-MM-SS/)
-                MediaStore.currentEventName = eventName
-                MediaStore.currentSessionName = sessionName
+                // Reuse the session name already set in startSession() so the Drive
+                // folder and the local Photobooth folder share the exact same name.
+                let sessionName = MediaStore.currentSessionName
                 let sessionID = try await drive.createFolder(name: "Session \(sessionName)", parentID: eventFolderID)
                 NSLog("[Drive] Session folder created: \(sessionID)")
                 try await drive.makePublic(fileID: sessionID)

@@ -143,7 +143,7 @@ struct ResultView: View {
             }
         case .slideshow, .live:
             if let player {
-                VideoPlayer(player: player)
+                StablePlayerView(player: player, controlsStyle: .inline)
                     .aspectRatio(9.0 / 16.0, contentMode: .fit)
             }
         }

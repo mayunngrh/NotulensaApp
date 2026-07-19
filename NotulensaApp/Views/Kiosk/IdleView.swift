@@ -54,9 +54,8 @@ struct IdleView: View {
             let url = MediaStore.url(for: path)
             if event.idleMediaIsVideo {
                 if let player {
-                    VideoPlayer(player: player)
-                        .disabled(true)
-                        .scaledToFill()
+                    StablePlayerView(player: player, videoGravity: .resizeAspectFill)
+                        .allowsHitTesting(false)
                 } else {
                     Color.black
                 }
