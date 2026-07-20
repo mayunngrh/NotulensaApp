@@ -1,12 +1,10 @@
 import SwiftUI
 
-/// Connect the app to Google Drive: paste the OAuth Desktop client credentials once,
-/// then sign in via the browser. Tokens live in the Keychain.
+/// Connect the app to Google Drive: sign in via the browser.
+/// OAuth credentials are baked into the app. User tokens live in the Keychain.
 struct GoogleDriveSettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @ObservedObject private var auth = GoogleAuthService.shared
-    @State private var clientID = ""
-    @State private var clientSecret = ""
     @State private var masterFolder = ""
     @State private var busy = false
     @State private var errorMessage: String?
@@ -14,15 +12,6 @@ struct GoogleDriveSettingsView: View {
     var body: some View {
         VStack(spacing: 0) {
             Form {
-                Section {
-                    TextField("Client ID", text: $clientID, prompt: Text("xxxx.apps.googleusercontent.com"))
-                    SecureField("Client Secret", text: $clientSecret)
-                } header: {
-                    Text("OAuth Client (Desktop app)")
-                } footer: {
-                    Text("Create once at console.cloud.google.com → APIs & Services → Credentials → Create credentials → OAuth client ID → Desktop app. Also enable the Google Drive API for the project.")
-                }
-
                 Section {
                     TextField("Master folder name", text: $masterFolder, prompt: Text("Photobooth"))
                 } header: {
@@ -48,7 +37,7 @@ struct GoogleDriveSettingsView: View {
                                 Label("Sign in with Google", systemImage: "person.crop.circle.badge.checkmark")
                             }
                         }
-                        .disabled(busy || clientID.isEmpty || clientSecret.isEmpty)
+                        .disabled(busy)
                     }
                     if let errorMessage {
                         Text(errorMessage)
@@ -72,12 +61,8 @@ struct GoogleDriveSettingsView: View {
         }
         .frame(width: 480, height: 540)
         .onAppear {
-            clientID = auth.clientID
-            clientSecret = auth.clientSecret
             masterFolder = auth.masterFolderName
         }
-        .onChange(of: clientID) { _ in auth.clientID = clientID }
-        .onChange(of: clientSecret) { _ in auth.clientSecret = clientSecret }
         .onChange(of: masterFolder) { _ in auth.masterFolderName = masterFolder }
     }
 
